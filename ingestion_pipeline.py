@@ -32,7 +32,7 @@ TOP_K_RERANK   = 100
 MAX_TOKENS     = 1024
 TEMPERATURE    = 0.1
 
-
+# region
 # # ── 1. Load documents
 # def load_file(doc_path: str):
 #     print(f"Loading documents from: {doc_path}")
@@ -70,6 +70,7 @@ TEMPERATURE    = 0.1
 #         print("-" * 50)
 
 #     return chunks
+# endregion
 
 # ── Helpers
 def parse_phrase_id(phrase_id: str) -> tuple[str, str]:
@@ -90,12 +91,13 @@ def parse_chunk_type(raw_text: str) -> tuple[str, str]:
     We KEEP the prefix in page_content because BGE was trained with it —
     stripping it slightly degrades retrieval quality.
     """
+
     if raw_text.startswith("Title:"):
-        return "title", raw_text          # keep full string with prefix
+        return raw_text          # keep full string with prefix
     elif raw_text.startswith("Passage:"):
-        return "passage", raw_text        # keep full string with prefix
+        return raw_text        # keep full string with prefix
     else:
-        return "unknown", raw_text
+        return raw_text
 
 # ── 0. Extract the wisefull information from the dataset
 def extract_meaningfull_data(json_path):
@@ -234,48 +236,86 @@ def load_file(json_path: Path) -> list[Document]:
         # ── Safely unpack the triplet
         question  = triplet.get("question", "")
         response    = triplet.get("response", "")
-        sentences   = triplet.get("sentences", [])
+        sentences   = triplet.get("sentences", [[]])
         id_triplet = triplet.get("id_triplets", "")
         # print(sentences)
         # break
 
 
         # ── Each phrase is a [phrase_id, raw_text] pair
-        for phrase in sentences:
-            # if not isinstance(phrase, list) or len(phrase) != 2:
-            #     skipped += 1
-            #     continue
+        for doc in sentences:
+            for phrase in doc:
 
-            phrase_id, raw_text = phrase[0]
-            # print(type(phrase_id), phrase_id)
+                phrase_id, raw_text = phrase
 
-            # print(type(phrase), phrase)
-            # print(type(raw_text), raw_text)
-            # Remove Title: and Passage: at the beginning
-            if (raw_text.startswith("Title:") or raw_text.startswith("Passage:")):
+                try:
+                    doc_id, phrase_seq = parse_phrase_id(phrase_id)
+                except ValueError:
+                    skipped += 1
+                    continue
+                # page_content = raw_text
+                # chunk_type, page_content = parse_chunk_type(raw_text)
+
+                # Chroma only accepts str / int / float / bool in metadata
+                # if ("Title: " in raw_text): print("Found in raw_text")
                 
-                raw_text.replace("Title:", "")
-                raw_text.replace("Passage:", "")
-            
+                page_content = raw_text.replace("Title: ", "")
+                
+                # if ("Title: " in page_content): print("Found in page") 
+                # else : print(page_content)
+                
+                page_content = raw_text.replace("Passage: ", "")
+                # print(page_content)
+                
+                documents.append(Document(
+                    page_content=page_content,
+                    metadata={
+                        "document_id"  : doc_id,        # str  e.g. '0'
+                        "phrase_seq"   : phrase_seq,     # str  e.g. 'a'
+                        "triplet_index": id_triplet,    # int  for tracing back to source
+                    }
+                ))
 
-            try:
-                doc_id, phrase_seq = parse_phrase_id(phrase_id)
-            except ValueError:
-                skipped += 1
-                continue
 
-            chunk_type, page_content = parse_chunk_type(raw_text)
+        # for phrase in sentences:
+        #     # if not isinstance(phrase, list) or len(phrase) != 2:
+        #     #     skipped += 1
+        #     #     continue
 
-            # Chroma only accepts str / int / float / bool in metadata
-            documents.append(Document(
-                page_content=page_content,
-                metadata={
-                    "document_id"  : doc_id,        # str  e.g. '0'
-                    "phrase_seq"   : phrase_seq,     # str  e.g. 'a'
-                    "chunk_type"   : chunk_type,     # str  'title' | 'passage'
-                    "triplet_index": id_triplet,    # int  for tracing back to source
-                }
-            ))
+        #     phrase_id, raw_text = phrase[0]
+        #     # print(type(phrase_id), phrase_id)
+
+        #     # print(type(phrase), phrase)
+        #     # print(type(raw_text), raw_text)
+        #     # Remove Title: and Passage: at the beginning
+        #     # if (raw_text.startswith("Title:") or raw_text.startswith("Passage:")):
+                
+        #     #     # print(repr(raw_text))
+        #     #     page_content = raw_text.replace("Title: ", "")
+        #     #     page_content = raw_text.replace("Passage: ", "")
+
+        #     try:
+        #         doc_id, phrase_seq = parse_phrase_id(phrase_id)
+        #     except ValueError:
+        #         skipped += 1
+        #         continue
+        #     # page_content = raw_text
+        #     # chunk_type, page_content = parse_chunk_type(raw_text)
+
+        #     # Chroma only accepts str / int / float / bool in metadata
+        #     if ("Title: " in raw_text): print("Found in raw_text")
+        #     page_content = raw_text.replace("Title: ", "")
+        #     if ("Title: " in page_content): print("Found in page")
+        #     page_content = raw_text.replace("Passage: ", "")
+        #     print(page_content)
+        #     documents.append(Document(
+        #         page_content=page_content,
+        #         metadata={
+        #             "document_id"  : doc_id,        # str  e.g. '0'
+        #             "phrase_seq"   : phrase_seq,     # str  e.g. 'a'
+        #             "triplet_index": id_triplet,    # int  for tracing back to source
+        #         }
+        #     ))
 
     print(f"  → {len(documents)} chunks loaded  |  {skipped} entries skipped")
 
@@ -285,6 +325,7 @@ def load_file(json_path: Path) -> list[Document]:
     #           f"({doc.metadata['chunk_type']}) {doc.page_content[:80]}…")
 
     return documents
+
 
 
 
