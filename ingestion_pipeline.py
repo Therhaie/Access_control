@@ -72,6 +72,39 @@ TEMPERATURE    = 0.1
 #     return chunks
 # endregion
 
+
+# -- Adapter for the vulnerability dataset
+
+def extract_data_vulnerability(json_path):
+    print(f"Loading dataset from: {json_path}")
+
+    if not os.path.exists(json_path):
+        raise FileNotFoundError(f"File not found: {json_path}")
+
+    with open(json_path, "r", encoding="utf-8") as f:
+        doc = json.load(f)
+        print(type(doc))
+        print(doc.keys())
+        results = [
+    {
+        "sentences": entry["row"]["documents_sentences"],
+        "question": entry["row"]["question"],
+        "response": entry["row"]["response"],
+        "id_triplets":entry["row"]["id"]
+    }
+    for entry in doc["rows"]
+    ]
+
+    with open(os.path.join(os.getcwd(),'documents_RAGBench', 'merged_id_triplets.json'), 'w') as f:
+        json.dump(results, f)
+
+
+
+
+
+
+
+
 # ── Helpers
 def parse_phrase_id(phrase_id: str) -> tuple[str, str]:
     """
@@ -277,45 +310,6 @@ def load_file(json_path: Path) -> list[Document]:
                 ))
 
 
-        # for phrase in sentences:
-        #     # if not isinstance(phrase, list) or len(phrase) != 2:
-        #     #     skipped += 1
-        #     #     continue
-
-        #     phrase_id, raw_text = phrase[0]
-        #     # print(type(phrase_id), phrase_id)
-
-        #     # print(type(phrase), phrase)
-        #     # print(type(raw_text), raw_text)
-        #     # Remove Title: and Passage: at the beginning
-        #     # if (raw_text.startswith("Title:") or raw_text.startswith("Passage:")):
-                
-        #     #     # print(repr(raw_text))
-        #     #     page_content = raw_text.replace("Title: ", "")
-        #     #     page_content = raw_text.replace("Passage: ", "")
-
-        #     try:
-        #         doc_id, phrase_seq = parse_phrase_id(phrase_id)
-        #     except ValueError:
-        #         skipped += 1
-        #         continue
-        #     # page_content = raw_text
-        #     # chunk_type, page_content = parse_chunk_type(raw_text)
-
-        #     # Chroma only accepts str / int / float / bool in metadata
-        #     if ("Title: " in raw_text): print("Found in raw_text")
-        #     page_content = raw_text.replace("Title: ", "")
-        #     if ("Title: " in page_content): print("Found in page")
-        #     page_content = raw_text.replace("Passage: ", "")
-        #     print(page_content)
-        #     documents.append(Document(
-        #         page_content=page_content,
-        #         metadata={
-        #             "document_id"  : doc_id,        # str  e.g. '0'
-        #             "phrase_seq"   : phrase_seq,     # str  e.g. 'a'
-        #             "triplet_index": id_triplet,    # int  for tracing back to source
-        #         }
-        #     ))
 
     print(f"  → {len(documents)} chunks loaded  |  {skipped} entries skipped")
 
