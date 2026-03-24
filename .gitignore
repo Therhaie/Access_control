@@ -1,0 +1,7 @@
+chroma_db/
+chroma_db11/
+venv/
+vulnerability_check/
+__pycache__/
+documents_RAGBench/
+
