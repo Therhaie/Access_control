@@ -4,4 +4,4 @@ venv/
 vulnerability_check/
 __pycache__/
 documents_RAGBench/
-
+documents_vulne/

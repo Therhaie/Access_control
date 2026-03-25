@@ -13,6 +13,7 @@ from config import VLLM_EMBED_BASE_URL, VLLM_API_KEY, EMBED_MODEL
 from config import *
 from typing import List, Callable
 from security import *
+import textwrap
 
 load_dotenv()
 
@@ -31,78 +32,6 @@ TOP_K_RERANK   = 100
 
 MAX_TOKENS     = 1024
 TEMPERATURE    = 0.1
-
-# region
-# # ── 1. Load documents
-# def load_file(doc_path: str):
-#     print(f"Loading documents from: {doc_path}")
-
-#     if not os.path.exists(doc_path):
-#         raise FileNotFoundError(f"Directory not found: {doc_path}")
-
-#     loader = DirectoryLoader(path=doc_path, glob="*.txt", loader_cls=TextLoader)
-#     documents = loader.load()
-
-#     if not documents:
-#         raise FileNotFoundError(f"No .txt files found in {doc_path}")
-
-#     for i, doc in enumerate(documents[:1]):
-#         print(f"\n Document {i+1}")
-#         print(f"  Source  : {doc.metadata['source']}")
-#         print(f"  Length  : {len(doc.page_content)} characters")
-#         print(f"  Preview : {doc.page_content[:100]}")
-
-#     return documents
-
-
-# # ── 2. Split into chunks
-# def split_documents(documents, chunk_size=CHUNK_SIZE, overlap=CHUNK_OVERLAP):
-#     print(f"\nSplitting into chunks (size={chunk_size}, overlap={overlap})")
-
-#     splitter = CharacterTextSplitter(chunk_size=chunk_size, chunk_overlap=overlap)
-#     chunks = splitter.split_documents(documents)
-
-#     print(f"  → {len(chunks)} chunks created")
-
-#     for i, chunk in enumerate(chunks[:3]):
-#         print(f"\n  Chunk {i+1} | Source: {chunk.metadata['source']}")
-#         print(f"  {chunk.page_content[:120]}")
-#         print("-" * 50)
-
-#     return chunks
-# endregion
-
-
-# -- Adapter for the vulnerability dataset
-
-def extract_data_vulnerability(json_path):
-    print(f"Loading dataset from: {json_path}")
-
-    if not os.path.exists(json_path):
-        raise FileNotFoundError(f"File not found: {json_path}")
-
-    with open(json_path, "r", encoding="utf-8") as f:
-        doc = json.load(f)
-        print(type(doc))
-        print(doc.keys())
-        results = [
-    {
-        "sentences": entry["row"]["documents_sentences"],
-        "question": entry["row"]["question"],
-        "response": entry["row"]["response"],
-        "id_triplets":entry["row"]["id"]
-    }
-    for entry in doc["rows"]
-    ]
-
-    with open(os.path.join(os.getcwd(),'documents_RAGBench', 'merged_id_triplets.json'), 'w') as f:
-        json.dump(results, f)
-
-
-
-
-
-
 
 
 # ── Helpers
@@ -133,7 +62,7 @@ def parse_chunk_type(raw_text: str) -> tuple[str, str]:
         return raw_text
 
 # ── 0. Extract the wisefull information from the dataset
-def extract_meaningfull_data(json_path):
+def extract_data_vulnerability(json_path):
     print(f"Loading dataset from: {json_path}")
 
     if not os.path.exists(json_path):
@@ -145,17 +74,63 @@ def extract_meaningfull_data(json_path):
         print(doc.keys())
         results = [
     {
-        "sentences": entry["row"]["documents_sentences"],
-        "question": entry["row"]["question"],
-        "response": entry["row"]["response"],
-        "id_triplets":entry["row"]["id"]
+        "description": entry['row']["description"],
+        "title": entry["row"]["title"],
+        "description": entry["row"]["description"],
+        "id_CVE":entry["row"]["id"]
     }
     for entry in doc["rows"]
     ]
 
-    with open(os.path.join(os.getcwd(),'documents_RAGBench', 'merged_id_triplets.json'), 'w') as f:
+    with open(os.path.join(os.getcwd(),'documents_vulne', 'data_vulne.json'), 'w') as f:
         json.dump(results, f)
 
+# def cut_into_chunk(path=os.path.join(os.getcwd(),'documents_vulne', 'data_vulne.json')):
+#     with open(os.path.join(os.getcwd(),'documents_vulne', 'data_vulne.json'), 'r') as f:
+#         data = json.load(f)
+#         new_rows = []
+#         for entry in data:
+#             # Merge title and description, strip leading/trailing whitespace
+#             merged_line = entry["description"] + entry["title"]
+#             # merged = (entry.get("title", "") + " " + entry.get("description", "")).strip()
+
+#             # Split into chunks of at most 176 characters (without splitting words)
+#             chunks = textwrap.wrap(merged_line, width=176)
+
+#             # Add each chunk as a separate row, repeating id_CVE
+#             for chunk in chunks:
+#                 new_rows.append({
+#                     "id_CVE": entry["id_CVE"],
+#                     "description": chunk
+#                 })
+
+#         # Output as JSON (optional)
+#         print(json.dumps(new_rows, f, indent=2))
+
+def cut_into_chunk(
+    path=os.path.join(os.getcwd(), 'documents_vulne', 'data_vulne.json'),
+    output_path=os.path.join(os.getcwd(), 'documents_vulne', 'data_vulne_cleaned.json')
+):
+    with open(path, 'r') as f:
+        data = json.load(f)
+        new_rows = []
+        for entry in data:
+            # Merge title and description, with a space (trim result)
+            merged_line = (entry.get("title", "") + " " + entry.get("description", "")).strip()
+
+            # Split into chunks of at most 176 characters (without splitting words)
+            chunks = textwrap.wrap(merged_line, width=176)
+
+            # Add each chunk as a separate row, repeating id_CVE
+            for chunk in chunks:
+                new_rows.append({
+                    "id_CVE": entry.get("id_CVE", ""),
+                    "description": chunk
+                })
+
+    with open(output_path, "w") as f_out:
+        json.dump(new_rows, f_out, indent=2)
+    print(f"{len(new_rows)} entries written to {output_path}")
 
 
 class CustomEmbeddings:
@@ -257,7 +232,7 @@ def load_file(json_path: Path) -> list[Document]:
     """
 
         
-    with open(os.path.join(os.getcwd(),'documents_RAGBench', 'merged_id_triplets.json'), 'r') as f:
+    with open(os.path.join(os.getcwd(),'documents_vulne', 'data_vulne.json'), 'r') as f:
         triplets = json.load(f)
 
     print(f"  → {len(triplets)} triplets found")
@@ -269,7 +244,7 @@ def load_file(json_path: Path) -> list[Document]:
         # ── Safely unpack the triplet
         question  = triplet.get("question", "")
         response    = triplet.get("response", "")
-        sentences   = triplet.get("sentences", [[]])
+        sentences   = triplet.get("description", [])
         id_triplet = triplet.get("id_triplets", "")
         # print(sentences)
         # break
@@ -352,7 +327,7 @@ def create_vector_store(chunks, persist_directory=CHROMA_PATH):
     return vectorstore
 
 def ingest_function(path):
-    path = os.path.join(os.getcwd(), 'documents_RAGBench', 'data.json')
+    path = os.path.join(os.getcwd(), 'documents_vulne', 'data_vulne.json')
     # extract_meaningfull_data(path)
     chunks  = load_file(path)
     vectore_store = create_vector_store(chunks)
@@ -507,11 +482,16 @@ def ingest_function(path):
 
 
 def main():
-    path = os.path.join(os.getcwd(), 'documents_RAGBench', 'data.json')
+    path = os.path.join(os.getcwd(), 'vulnerability_check', 'data_vulnerability.json')
+    # extract_data_vulnerability(path)
+    cut_into_chunk()
+
     # extract_meaningfull_data(path)
-    chunks  = load_file(path)
-    vectore_store = create_vector_store(chunks)
-    print("\n ingestion completed")
+    # chunks  = load_file(path)
+    # vectore_store = create_vector_store(chunks)
+    # print("\n ingestion completed")
+    # ingest_function()
+
 
 if __name__ == "__main__":
     main()
