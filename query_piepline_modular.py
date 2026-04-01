@@ -178,7 +178,10 @@ def _messages(question: str, context: str) -> list[dict]:
 def _check_vllm_health() -> bool:
     import httpx
     try:
-        r = httpx.get(f"{VLLM_BASE_URL.replace('/v1', '')}/health", timeout=3)
+        # r = httpx.get(f"{VLLM_BASE_URL.replace('/v1', '')}/health", timeout=3)
+        r = httpx.get(f"{VLLM_EMBED_BASE_URL.replace('/v1', '')}/health", timeout=3)
+        # r = httpx.get(f"{VLLM_EMBED_BASE_URL}/health", timeout=3)
+        
         if r.status_code == 200:
             print("✅ vLLM server is running.")
             return True
@@ -187,6 +190,38 @@ def _check_vllm_health() -> bool:
     print("❌ vLLM server not reachable at", VLLM_BASE_URL)
     print("   Start it with:  vllm serve meta-llama/Meta-Llama-3.1-8B-Instruct --dtype bfloat16")
     return False
+
+
+
+
+
+def check_vllm_embedding_ready(base_url="http://localhost:8001", model_name="BAAI/bge-large-en-v1.5") -> bool:
+    # First, basic health
+    import httpx
+    try:
+        r = httpx.get(f"{base_url}/health", timeout=3)
+        if r.status_code == 200:
+            print("✅ Basic vLLM server health OK.")
+        else:
+            print("❌ vLLM /health NOT OK.")
+            return False
+    except Exception as e:
+        print("❌ vLLM health error:", e)
+        return False
+    # Now, test embedding endpoint
+    payload = {'input': ["test"], 'model': model_name}
+    try:
+        r = httpx.post(f"{base_url}/v1/embeddings", content=json.dumps(payload), timeout=3, headers={'Content-Type': 'application/json'})
+        if r.status_code == 200:
+            print("✅ Embeddings endpoint is ready.")
+            return True
+        else:
+            print(f"❌ Embeddings endpoint error: {r.status_code}, {r.text}")
+            return False
+    except Exception as e:
+        print("❌ Error POSTing to embeddings:", e)
+        return False
+
 
 
 # ── Shared retrieve-and-optionally-rerank helper ──────────────────────────────

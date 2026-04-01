@@ -84,6 +84,34 @@ def extract_meaningfull_data(json_path):
         json.dump(results, f)
 
 
+def remove_duplicates_in_json(input_path, output_path):
+    with open(input_path, 'r', encoding='utf-8') as f:
+        file = json.load(f)
+
+    seen = set()
+    unique_data = []
+    for entry in file:
+        sentences_ = []
+        for document in entry["sentences"]:
+            for sentence in document:
+                # identifier =entry["row"]["documents_sentences"]
+                if sentence[1] not in seen:
+                    seen.add(sentence[1])
+                    sentences_.append(sentence)
+        unique_data.append(
+            {
+                "sentences": sentences_,
+                "question": entry["question"],
+                "response": entry["response"],
+                "id_triplets":entry["id_triplets"]
+            }
+        )
+    with open(output_path, 'w', encoding='utf-8') as f:
+        json.dump(unique_data, f, indent=2)
+
+
+
+
 
 class CustomEmbeddings:
     """
@@ -183,8 +211,8 @@ def load_file(json_path: Path) -> list[Document]:
         - triplet_index: int  — position of the parent triplet in the dataset
     """
 
-        
-    with open(os.path.join(os.getcwd(),'documents_RAGBench', 'merged_id_triplets.json'), 'r') as f:
+    with open(json_path, "r", encoding="utf-8") as f:    
+    # with open(os.path.join(os.getcwd(),'documents_RAGBench', 'merged_id_triplets.json'), 'r') as f:
         triplets = json.load(f)
 
     print(f"  → {len(triplets)} triplets found")
@@ -200,31 +228,33 @@ def load_file(json_path: Path) -> list[Document]:
         id_triplet = triplet.get("id_triplets", "")
 
         # ── Each phrase is a [phrase_id, raw_text] pair
-        for doc in sentences:
-            for phrase in doc:
+        for phrase in sentences:
+            # for phrase in doc:
 
-                phrase_id, raw_text = phrase
+            phrase_id, raw_text = phrase
 
-                try:
-                    doc_id, phrase_seq = parse_phrase_id(phrase_id)
-                except ValueError:
-                    skipped += 1
-                    continue
+            try:
+                doc_id, phrase_seq = parse_phrase_id(phrase_id)
+            except ValueError:
+                skipped += 1
+                continue
 
-                # Chroma only accepts str / int / float / bool in metadata
-                
+            # Chroma only accepts str / int / float / bool in metadata
+            if raw_text.startswith("Title:"):
                 page_content = raw_text.replace("Title: ", "")
-                
+            elif raw_text.startswith("Passage:"):
                 page_content = raw_text.replace("Passage: ", "")
-                
-                documents.append(Document(
-                    page_content=page_content,
-                    metadata={
-                        "document_id"  : doc_id,        # str  e.g. '0'
-                        "phrase_seq"   : phrase_seq,     # str  e.g. 'a'
-                        "triplet_index": id_triplet,    # int  for tracing back to source
-                    }
-                ))
+            else:
+                page_content = raw_text
+            
+            documents.append(Document(
+                page_content=page_content,
+                metadata={
+                    "document_id"  : doc_id,        # str  e.g. '0'
+                    "phrase_seq"   : phrase_seq,     # str  e.g. 'a'
+                    "triplet_index": id_triplet,    # int  for tracing back to source
+                }
+            ))
 
 
     print(f"  → {len(documents)} chunks loaded  |  {skipped} entries skipped")
@@ -287,7 +317,7 @@ def create_vector_store(chunks, persist_directory=CHROMA_PATH):
     return vectorstore
 
 def ingest_function(path):
-    path = os.path.join(os.getcwd(), 'documents_RAGBench', 'data.json')
+    path = os.path.join(os.getcwd(), 'documents_RAGBench', 'merged_id_triplets.json')
     # extract_meaningfull_data(path)
     chunks  = load_file(path)
     vectore_store = create_vector_store(chunks)
@@ -296,9 +326,12 @@ def ingest_function(path):
 
 
 def main():
-    path = os.path.join(os.getcwd(), 'documents_RAGBench', 'data.json')
+    # path = os.path.join(os.getcwd(), 'documents_RAGBench', 'merged_id_triplets.json')
+    
     # extract_meaningfull_data(path)
-    chunks  = load_file(path)
+    path_output = os.path.join(os.getcwd(),'documents_RAGBench', 'merged_id_triplets_no_duplicates.json')   
+    # remove_duplicates_in_json(path, path_output)
+    chunks  = load_file(path_output)
     vectore_store = create_vector_store(chunks)
     print("\n ingestion completed")
 

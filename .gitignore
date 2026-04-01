@@ -7,3 +7,6 @@ documents_RAGBench/
 documents_vulne/
 plots/
 results/
+venv2/
+chroma_rotated_db/
+chroma_dim_db/

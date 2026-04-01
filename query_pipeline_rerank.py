@@ -258,7 +258,7 @@ def ask(question: str, verbose: bool = True) -> tuple[str, dict]:
 
     context  = build_context(chunks)
     messages = _messages(question, context)
-    client   = get_openai_client()
+    client   = get_llm()  # use raw OpenAI client
 
     response = client.chat.completions.create(
         model=LLM_MODEL,

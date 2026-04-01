@@ -98,6 +98,50 @@ DEFAULT_TOP_K       = 20
 ALL_CONDITIONS = ["baseline", "rotation", "extra_dim", "metadata_filter"]
 
 
+import time
+
+_EMBEDDER = None
+
+
+def get_global_embedder():
+    global _EMBEDDER
+
+    if _EMBEDDER is not None:
+        return _EMBEDDER
+
+    print("🔄 Initialising embedding model...")
+
+    _check_vllm_health()
+    check_vllm_embedding_ready()
+
+    embedder = get_embedding_model()
+
+    # Warmup (stabilises vLLM)
+    for i in range(5):
+        try:
+            _ = embedder.embed_query("warmup")
+        except Exception as e:
+            print(f"⏳ Warmup retry {i+1}: {e}")
+            time.sleep(1)
+
+    print("✅ Embedding model ready.")
+    _EMBEDDER = embedder
+    return _EMBEDDER
+
+
+def safe_embed(embedder, text: str, retries: int = 5):
+    for i in range(retries):
+        try:
+            return embedder.embed_query(text)
+        except Exception as e:
+            print(f"⚠️ Embed retry {i+1}: {e}")
+            time.sleep(1)
+
+    raise RuntimeError("Embedding failed after retries")
+
+
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # 1.  Retrieval helpers — one per condition
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -329,6 +373,98 @@ class ConditionResult:
     t_generate_s:float
 
 
+# def evaluate_sample_all_conditions(
+#     sample: dict,
+#     conditions: list[str],
+#     embedder,
+#     registry: Optional[RotationRegistry],
+#     dim_cfg: Optional[ExtraDimConfig],
+#     gt_stable_chunks: list[dict],
+#     top_k: int,
+#     judge_url: str,
+#     judge_model: str,
+#     verbose: bool,
+# ) -> dict:
+#     question      = sample["question"]
+#     ground_truth = sample["response"] # old ground_truth  = sample["ground_truth"]
+#     triplet_index = str(sample.get("triplet_index", sample.get("id", "?")))
+
+#     # Identify rotation groups for this query
+#     group_keys = list({
+#         f"{c['triplet_index']}|{c['document_id']}"
+#         for c in gt_stable_chunks
+#     })
+
+#     raw_query_vec = np.array(
+#         embedder.embed_query(BGE_QUERY_PREFIX + question), dtype=np.float32
+#     )
+
+#     condition_results: dict[str, dict] = {}
+
+#     for condition in conditions:
+#         if verbose:
+#             print(f"    → {condition} …", end=" ", flush=True)
+
+#         t0 = time.time()
+
+#         if condition == "baseline":
+#             chunks = _retrieve_baseline(raw_query_vec, top_k)
+
+#         elif condition == "rotation":
+#             if registry is None:
+#                 print("(registry not loaded, skipping)")
+#                 continue
+#             chunks = _retrieve_rotation(raw_query_vec, registry, group_keys, top_k)
+
+#         elif condition == "extra_dim":
+#             if dim_cfg is None:
+#                 print("(dim config not loaded, skipping)")
+#                 continue
+#             # Authorised query — sees restricted chunks
+#             chunks = _retrieve_extra_dim(raw_query_vec, dim_cfg, is_authorised=True, top_k=top_k)
+
+#         elif condition == "metadata_filter":
+#             chunks = _retrieve_metadata_filter(raw_query_vec, top_k, use_pre_filter=True)
+
+#         else:
+#             continue
+
+#         t_retrieve = time.time() - t0
+
+#         t1     = time.time()
+#         answer = _generate_answer(question, chunks)
+#         t_gen  = time.time() - t1
+
+#         trace  = _score_trace(question, ground_truth, chunks, answer, judge_url, judge_model)
+#         trace_mean = sum(
+#             v for v in [
+#                 trace["context_relevance"], trace["answer_faithfulness"],
+#                 trace["context_utilization"], trace["answer_completeness"],
+#             ] if v is not None
+#         ) / max(1, sum(
+#             1 for v in [
+#                 trace["context_relevance"], trace["answer_faithfulness"],
+#                 trace["context_utilization"], trace["answer_completeness"],
+#             ] if v is not None
+#         ))
+
+#         condition_results[condition] = {
+#             "answer":        answer,
+#             "trace":         trace,
+#             "trace_mean":    round(trace_mean, 4),
+#             "t_retrieve_s":  round(t_retrieve, 3),
+#             "t_generate_s":  round(t_gen, 3),
+#             "n_chunks":      len(chunks),
+#         }
+#         if verbose:
+#             print(f"TRACe={trace_mean:.3f}  t_ret={t_retrieve:.2f}s")
+
+#     return {
+#         "question":      question,
+#         "ground_truth":  ground_truth,
+#         "triplet_index": triplet_index,
+#         "conditions":    condition_results,
+#     }
 def evaluate_sample_all_conditions(
     sample: dict,
     conditions: list[str],
@@ -341,25 +477,25 @@ def evaluate_sample_all_conditions(
     judge_model: str,
     verbose: bool,
 ) -> dict:
+
     question      = sample["question"]
-    ground_truth = sample["response"] # old ground_truth  = sample["ground_truth"]
+    ground_truth  = sample["response"]
     triplet_index = str(sample.get("triplet_index", sample.get("id", "?")))
 
-    # Identify rotation groups for this query
     group_keys = list({
         f"{c['triplet_index']}|{c['document_id']}"
         for c in gt_stable_chunks
     })
 
+    # 🔥 SAFE EMBEDDING HERE
     raw_query_vec = np.array(
-        embedder.embed_query(BGE_QUERY_PREFIX + question), dtype=np.float32
+        safe_embed(embedder, BGE_QUERY_PREFIX + question),
+        dtype=np.float32
     )
 
     condition_results: dict[str, dict] = {}
 
     for condition in conditions:
-        if verbose:
-            print(f"    → {condition} …", end=" ", flush=True)
 
         t0 = time.time()
 
@@ -368,19 +504,18 @@ def evaluate_sample_all_conditions(
 
         elif condition == "rotation":
             if registry is None:
-                print("(registry not loaded, skipping)")
                 continue
             chunks = _retrieve_rotation(raw_query_vec, registry, group_keys, top_k)
 
         elif condition == "extra_dim":
             if dim_cfg is None:
-                print("(dim config not loaded, skipping)")
                 continue
-            # Authorised query — sees restricted chunks
-            chunks = _retrieve_extra_dim(raw_query_vec, dim_cfg, is_authorised=True, top_k=top_k)
+            chunks = _retrieve_extra_dim(
+                raw_query_vec, dim_cfg, is_authorised=True, top_k=top_k
+            )
 
         elif condition == "metadata_filter":
-            chunks = _retrieve_metadata_filter(raw_query_vec, top_k, use_pre_filter=True)
+            chunks = _retrieve_metadata_filter(raw_query_vec, top_k, True)
 
         else:
             continue
@@ -391,16 +526,23 @@ def evaluate_sample_all_conditions(
         answer = _generate_answer(question, chunks)
         t_gen  = time.time() - t1
 
-        trace  = _score_trace(question, ground_truth, chunks, answer, judge_url, judge_model)
+        trace  = _score_trace(
+            question, ground_truth, chunks, answer, judge_url, judge_model
+        )
+
         trace_mean = sum(
             v for v in [
-                trace["context_relevance"], trace["answer_faithfulness"],
-                trace["context_utilization"], trace["answer_completeness"],
+                trace["context_relevance"],
+                trace["answer_faithfulness"],
+                trace["context_utilization"],
+                trace["answer_completeness"],
             ] if v is not None
         ) / max(1, sum(
             1 for v in [
-                trace["context_relevance"], trace["answer_faithfulness"],
-                trace["context_utilization"], trace["answer_completeness"],
+                trace["context_relevance"],
+                trace["answer_faithfulness"],
+                trace["context_utilization"],
+                trace["answer_completeness"],
             ] if v is not None
         ))
 
@@ -412,8 +554,6 @@ def evaluate_sample_all_conditions(
             "t_generate_s":  round(t_gen, 3),
             "n_chunks":      len(chunks),
         }
-        if verbose:
-            print(f"TRACe={trace_mean:.3f}  t_ret={t_retrieve:.2f}s")
 
     return {
         "question":      question,
@@ -485,34 +625,35 @@ def run_conditions_eval(
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     conditions = conditions or ALL_CONDITIONS
 
-    # ── Load dataset ──────────────────────────────────────────────────────────
     with open(dataset_path, encoding="utf-8") as fh:
         dataset: list[dict] = json.load(fh)
     if limit:
         dataset = dataset[:limit]
 
-    # ── Load ground-truth retrievals for group-key resolution ─────────────────
     gt_lookup: dict[str, list[dict]] = {}
     if Path(gt_path).exists():
         with open(gt_path, encoding="utf-8") as fh:
             for rec in json.load(fh):
                 gt_lookup[rec["triplet_index"]] = rec.get("stable_chunks", [])
 
-    # ── Load rotation registry ────────────────────────────────────────────────
+    # ── SINGLE EMBEDDER INITIALISATION ───────────────────────────────────────
+    embedder = get_global_embedder()
+
+    # ── Rotation registry ────────────────────────────────────────────────────
     registry: Optional[RotationRegistry] = None
     if "rotation" in conditions:
-        _check_vllm_health()  # ensure vLLM server is up before loading registry (which depends on embedder)
-        check_vllm_embedding_ready()
-        embedder_probe = get_embedding_model()
-        dim            = len(embedder_probe.embed_query("probe"))
+        dim = len(safe_embed(embedder, "probe"))
+
         if ROTATION_REGISTRY_F.exists():
             with open(ROTATION_REGISTRY_F, encoding="utf-8") as fh:
-                registry = RotationRegistry.from_serialisable(json.load(fh), dim=dim)
+                registry = RotationRegistry.from_serialisable(
+                    json.load(fh), dim=dim
+                )
             print(f"  Rotation registry loaded: {len(registry.all_keys())} groups")
         else:
-            print("  ⚠  Rotation registry not found — rotation condition will be skipped.")
+            print("  ⚠ Rotation registry not found — skipping rotation.")
 
-    # ── Build dim config ──────────────────────────────────────────────────────
+    # ── Dim config ───────────────────────────────────────────────────────────
     dim_cfg: Optional[ExtraDimConfig] = None
     if "extra_dim" in conditions:
         dim_cfg = ExtraDimConfig(
@@ -522,8 +663,6 @@ def run_conditions_eval(
             normalize_after=normalize_after,
         )
         print(f"  Dim config: {dim_cfg.config_id}")
-
-    embedder = get_embedding_model()
 
     print(f"\n{'═'*62}")
     print(f"  TRACE Conditions Evaluation")
@@ -554,7 +693,6 @@ def run_conditions_eval(
 
     summary = _aggregate_conditions(all_sample_results, conditions)
 
-    # ── Persist ───────────────────────────────────────────────────────────────
     with open(CONDITIONS_RESULTS_FILE, "w", encoding="utf-8") as fh:
         json.dump(all_sample_results, fh, indent=2, ensure_ascii=False)
 
@@ -568,27 +706,12 @@ def run_conditions_eval(
     with open(CONDITIONS_SUMMARY_FILE, "w", encoding="utf-8") as fh:
         json.dump(full_output, fh, indent=2, ensure_ascii=False)
 
-    # ── Print summary table ───────────────────────────────────────────────────
-    bar = "═" * 72
-    print(f"\n{bar}")
-    print(f"  {'Condition':<18} {'CR':>6} {'AF':>6} {'CU':>6} {'AC':>6} "
-          f"{'TRACe':>7} {'F1':>6} {'t_ret':>7}")
-    print(f"  {'─'*68}")
-    for cond, s in summary.items():
-        def _fmt(v): return f"{v:.3f}" if v is not None else "  N/A"
-        print(f"  {cond:<18} "
-              f"{_fmt(s['context_relevance_mean']):>6} "
-              f"{_fmt(s['answer_faithfulness_mean']):>6} "
-              f"{_fmt(s['context_utilization_mean']):>6} "
-              f"{_fmt(s['answer_completeness_mean']):>6} "
-              f"{_fmt(s['trace_mean']):>7} "
-              f"{_fmt(s['answer_f1_mean']):>6} "
-              f"{_fmt(s['t_retrieve_mean']):>7}s")
-    print(f"{bar}\n")
-    print(f"  Results → {CONDITIONS_RESULTS_FILE}")
-    print(f"  Summary → {CONDITIONS_SUMMARY_FILE}\n")
-
     return full_output
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MODIFY evaluate_sample_all_conditions()
+# ─────────────────────────────────────────────────────────────────────────────
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

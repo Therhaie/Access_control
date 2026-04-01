@@ -82,7 +82,7 @@ from chromadb.config import Settings
 
 from ingestion_pipeline import get_embedding_model
 from query_pipeline import BGE_QUERY_PREFIX
-
+from config import COLLECTION
 # ── Paths ─────────────────────────────────────────────────────────────────────
 RESULTS_DIR      = Path("results")
 GT_FILE          = RESULTS_DIR / "ground_truth_retrievals.json"
@@ -90,7 +90,7 @@ DIM_RESULTS_FILE = RESULTS_DIR / "dim_results.json"
 DIM_REGISTRY_FILE= RESULTS_DIR / "dim_registry.json"
 
 ORIGINAL_CHROMA      = os.path.join(os.getcwd(), "./chroma_db")
-ORIGINAL_COLLECTION  = "langchain"
+ORIGINAL_COLLECTION  = COLLECTION
 DIM_CHROMA_BASE      = os.path.join(os.getcwd(), "./chroma_dim_db")
 
 DEFAULT_TOP_K        = 20

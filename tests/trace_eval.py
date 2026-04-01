@@ -82,9 +82,11 @@ RUNS_FILE    = RESULTS_DIR / "eval_runs.jsonl"
 SAMPLES_FILE = RESULTS_DIR / "eval_samples.jsonl"   # per-question detail
 
 # ── Judge defaults ────────────────────────────────────────────────────────────
-DEFAULT_JUDGE_URL   = "http://localhost:8002/v1/chat/completions"
-DEFAULT_JUDGE_MODEL = "mistralai/Mistral-7B-Instruct-v0.3"
+# DEFAULT_JUDGE_URL   = "http://localhost:8002/v1/chat/completions"
+# DEFAULT_JUDGE_MODEL = "mistralai/Mistral-7B-Instruct-v0.3"
 
+DEFAULT_JUDGE_URL   = "http://localhost:8000/v1/chat/completions"
+DEFAULT_JUDGE_MODEL = "mistralai/Mistral-7B-Instruct-v0.2"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # 1. Judge LLM caller

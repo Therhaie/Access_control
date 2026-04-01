@@ -5,7 +5,8 @@ import os
 # CHROMA_PATH    = "./chroma_db"
 CHROMA_PATH = os.path.join(os.getcwd(), './chroma_db')
 DOCS_PATH      = "./documents"
-COLLECTION = "my_knowledge_base" # Name classical embedded database
+COLLECTION     = 'baseline_db'
+# COLLECTION = "my_knowledge_base" # Name classical embedded database
 # COLLECTION = "rotated_db" # database with a rotation added to the embedding
 
 # ── LLM server (port 8000)

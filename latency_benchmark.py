@@ -54,6 +54,7 @@ import chromadb
 import numpy as np
 from chromadb.config import Settings
 
+from config import COLLECTION
 from ingestion_pipeline import get_embedding_model
 from query_pipeline import BGE_QUERY_PREFIX
 from rotation_experiment import (
@@ -73,7 +74,7 @@ LATENCY_RESULTS_FILE = RESULTS_DIR / "latency_benchmark.json"
 LATENCY_SUMMARY_FILE = RESULTS_DIR / "latency_summary.json"
 
 ORIGINAL_CHROMA      = os.path.join(os.getcwd(), "./chroma_db")
-ORIGINAL_COLLECTION  = "langchain"
+ORIGINAL_COLLECTION  = COLLECTION
 
 DEFAULT_REPEATS      = 7
 DEFAULT_TOP_K        = 20

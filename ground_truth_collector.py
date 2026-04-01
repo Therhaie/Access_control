@@ -74,8 +74,10 @@ def _chunk_key(chunk: dict) -> str:
     We use (triplet_index, document_id, phrase_seq) — this maps exactly to
     the metadata stored during ingestion.
     """
-    return f"{chunk.get('triplet_index','?')}|{chunk.get('document_id','?')}|{chunk.get('phrase_seq','?')}"
-
+    return f"{chunk.get('source','?')}|{chunk.get('page','?')}|{chunk.get('phrase_seq','?')}"
+    # return f"{chunk.get('triplet_index','?')}|{chunk.get('document_id','?')}|{chunk.get('phrase_seq','?')}"
+    # return f"{chunk.get('source','?')}|{chunk.get('page','?')}|{chunk.get('phrase_seq','?')}"
+    # can also return the 'bge_score' 
 
 def collect_stable_chunks(
     question: str,
@@ -109,6 +111,7 @@ def collect_stable_chunks(
                     "document_id":   str(c.get("document_id",   "?")),
                     "phrase_seq":    str(c.get("phrase_seq",     "?")),
                 }
+                # to modify accordingly to _chunk_key changes done
         if verbose:
             print(f"      run {run_idx+1}/{n_runs} — {len(candidates)} candidates")
 
@@ -152,6 +155,7 @@ def run_collection(
 
     with open(dataset_path, encoding="utf-8") as fh:
         dataset: list[dict] = json.load(fh)
+        # dataset_like : list[list[dict]] =json.load(fh)
 
     if limit:
         dataset = dataset[:limit]
@@ -164,9 +168,11 @@ def run_collection(
 
     records: list[dict] = []
 
+    # Version without the for loop to iterate on the sentences of the dataset
     for i, entry in enumerate(dataset, 1):
+        # for question in entry["sentences"]:
         question      = entry["question"]
-        triplet_index = str(entry.get("triplet_index", entry.get("id", i)))
+        triplet_index = str(entry.get("id_triplets", entry.get("id", i)))
         query_id      = f"triplet_{triplet_index}"
 
         print(f"[{i}/{len(dataset)}] {query_id}  Q: {question[:70]}…")
@@ -184,7 +190,7 @@ def run_collection(
             "query_id":      query_id,
             "question":      question,
             "triplet_index": triplet_index,
-            "ground_truth":  entry.get("ground_truth", ""),
+            "ground_truth":  entry.get("response", ""),
             "runs":          n_runs,
             "threshold":     threshold,
             "stable_chunks": stable,
@@ -192,9 +198,41 @@ def run_collection(
         }
         records.append(record)
 
-        print(f"  → {len(stable)} stable chunks  "
-              f"(from {top_k} retrieved × {n_runs} runs)  "
-              f"[{record['elapsed_s']}s]\n")
+    print(f"  → {len(stable)} stable chunks  "
+            f"(from {top_k} retrieved × {n_runs} runs)  "
+            f"[{record['elapsed_s']}s]\n")
+    
+    # for i, entry in enumerate(dataset, 1):
+    #     question      = entry["question"]
+    #     triplet_index = str(entry.get("triplet_index", entry.get("id", i)))
+    #     query_id      = f"triplet_{triplet_index}"
+
+    #     print(f"[{i}/{len(dataset)}] {query_id}  Q: {question[:70]}…")
+    #     t0 = time.time()
+
+    #     stable = collect_stable_chunks(
+    #         question  = question,
+    #         n_runs    = n_runs,
+    #         threshold = threshold,
+    #         top_k     = top_k,
+    #         verbose   = verbose,
+    #     )
+
+    #     record = {
+    #         "query_id":      query_id,
+    #         "question":      question,
+    #         "triplet_index": triplet_index,
+    #         "ground_truth":  entry.get("ground_truth", ""),
+    #         "runs":          n_runs,
+    #         "threshold":     threshold,
+    #         "stable_chunks": stable,
+    #         "elapsed_s":     round(time.time() - t0, 2),
+    #     }
+    #     records.append(record)
+
+    #     print(f"  → {len(stable)} stable chunks  "
+    #           f"(from {top_k} retrieved × {n_runs} runs)  "
+    #           f"[{record['elapsed_s']}s]\n")
 
     # ── Persist ───────────────────────────────────────────────────────────────
     with open(OUTPUT_FILE, "w", encoding="utf-8") as fh:

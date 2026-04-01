@@ -27,6 +27,9 @@ from ingestion_pipeline import ingest_function
 from openai import OpenAI
 
 CHROMA_PATH = os.path.join(os.getcwd(), './chroma_db')
+ORIGINAL_CHROMA      = os.path.join(os.getcwd(), "./chroma_db") # same name as CHROMA_PATH but necessary because of import from trace_conditions_eval.py
+
+
 
 BGE_QUERY_PREFIX = "Represent this sentence for searching relevant passages: "
 
@@ -155,17 +158,19 @@ def retrieve(query: str,
     t_retrieve = time.time() - t0
 
     candidates = []
+    # take the [0] as it's a list of lists
     for doc, meta, dist in zip(
         results["documents"][0],
         results["metadatas"][0],
         results["distances"][0],
     ):
         similarity = round(1.0 - float(dist), 4)
-        print("similarity",similarity)
+        # print("similarity",similarity)
         candidates.append({
             "content":      doc,
             "source":       meta.get("triplet_index", "?"),
             "page":         meta.get("document_id", "?"),
+            "phrase_seq":  meta.get("phrase_seq", "?"),
             "bge_score":    similarity,
             "rerank_score": None,
         })
@@ -176,6 +181,48 @@ def retrieve(query: str,
     "n_candidates": len(candidates),
     "t_retrieve_s": round(t_retrieve, 2)
 }
+
+
+# def retrieve(query: str,
+#     top_k_retrieve: int = TOP_K_RETRIEVE
+#     ) -> tuple[list[dict], dict]:
+    
+#     t0         = time.time()
+#     collection = get_collection()
+#     embedder   = get_embedding_model()
+#     query_vec  = embedder.embed_query(BGE_QUERY_PREFIX + query)
+
+#     results = collection.query(
+#         query_embeddings=[query_vec],
+#         n_results=min(top_k_retrieve, collection.count()),
+#         include=["documents", "metadatas", "distances"],
+#     )
+#     t_retrieve = time.time() - t0
+
+#     candidates = []
+#     # take the [0] as it's a list of lists
+#     for doc, meta, dist in zip(
+#         results["documents"][0],
+#         results["metadatas"][0],
+#         results["distances"][0],
+#     ):
+#         similarity = round(1.0 - float(dist), 4)
+#         # print("similarity",similarity)
+#         candidates.append({
+#             "content":      doc,
+#             "source":       meta.get("triplet_index", "?"),
+#             "page":         meta.get("document_id", "?"),
+#             "bge_score":    similarity,
+#             "rerank_score": None,
+#         })
+    
+ 
+        
+#     return candidates, {
+#     "n_candidates": len(candidates),
+#     "t_retrieve_s": round(t_retrieve, 2)
+# }
+
 
 # ── Prompt helpers ────────────────────────────────────────────────────────────
 SYSTEM_PROMPT = (
