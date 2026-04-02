@@ -24,6 +24,10 @@ content, source (=triplet_index), page (=document_id), phrase_seq, bge_score (=s
 
 
 
+collect_chunks for each runs the dictionnary seen append the similarity associated to a "key", 3 data necessary to identify a chunk in the str format *(source (=triplet_index), page (=document_id), phrase_seq)*
+then the "key" is also used to store the content of the chunk inside another dictionnary.
+
+
 # Experiments :
 
 ## Experiment : Accessing the effectivness of the rotation to prevent the access 

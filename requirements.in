@@ -8,3 +8,4 @@ openai
 sentence_transformers
 matplotlib
 pandas
+seaborn

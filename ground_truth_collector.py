@@ -108,7 +108,7 @@ def collect_stable_chunks(
                 payloads[key] = {
                     "content":       c.get("content", ""),
                     "triplet_index": str(c.get("triplet_index", c.get("source", "?"))),
-                    "document_id":   str(c.get("document_id",   "?")),
+                    "document_id":   str(c.get("document_id",   c.get("page", "?"))),
                     "phrase_seq":    str(c.get("phrase_seq",     "?")),
                 }
                 # to modify accordingly to _chunk_key changes done

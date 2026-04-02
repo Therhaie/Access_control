@@ -10,3 +10,4 @@ results/
 venv2/
 chroma_rotated_db/
 chroma_dim_db/
+*.png
