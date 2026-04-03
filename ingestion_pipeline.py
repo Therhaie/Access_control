@@ -60,7 +60,7 @@ def parse_chunk_type(raw_text: str) -> tuple[str, str]:
         return raw_text
 
 # ── 0. Extract the wisefull information from the dataset
-def extract_meaningfull_data(json_path):
+def extract_meaningfull_data(json_path, output_path=os.path.join(os.getcwd(),'documents_RAGBench', 'merged_id_triplets.json')):
     print(f"Loading dataset from: {json_path}")
 
     if not os.path.exists(json_path):
@@ -70,17 +70,35 @@ def extract_meaningfull_data(json_path):
         doc = json.load(f)
         print(type(doc))
         print(doc.keys())
-        results = [
-    {
-        "sentences": entry["row"]["documents_sentences"],
-        "question": entry["row"]["question"],
-        "response": entry["row"]["response"],
-        "id_triplets":entry["row"]["id"]
-    }
-    for entry in doc["rows"]
-    ]
+    # results = [
+    # {
+    #     "sentences": entry["row"]["documents_sentences"],
+    #     "question": entry["row"]["question"],
+    #     "response": entry["row"]["response"],
+    #     "id_triplets":entry["row"]["id"]
+    # }
+    # for entry in doc["rows"]
+    # ]
+    results = []
+    for entry in doc.get('rows', []):
+        row = entry.get('row', {})
+        sentences = row.get('documents_sentences', [])
+        question = row.get('question', '')
+        response = row.get('response', '')
+        id_triplet = row.get('id', '')
+        if id_triplet == "1128":
+            print(f"Debug: Found id_triplet 1128 with question: {question}")
+        results.append({
+            "sentences": sentences,
+            "question": question,
+            "response": response,
+            "id_triplets": id_triplet
+        })
+        if id_triplet == "1128":
+            pass
+        
 
-    with open(os.path.join(os.getcwd(),'documents_RAGBench', 'merged_id_triplets.json'), 'w') as f:
+    with open(output_path, 'w') as f:
         json.dump(results, f)
 
 
@@ -326,13 +344,14 @@ def ingest_function(path):
 
 
 def main():
-    # path = os.path.join(os.getcwd(), 'documents_RAGBench', 'merged_id_triplets.json')
+    path_raw_data = os.path.join(os.getcwd(), 'documents_RAGBench', 'data.json')
+    path_merged_id_triplets = os.path.join(os.getcwd(), 'documents_RAGBench', 'merged_id_triplets2.json')
     
-    # extract_meaningfull_data(path)
-    path_output = os.path.join(os.getcwd(),'documents_RAGBench', 'merged_id_triplets_no_duplicates.json')   
+    extract_meaningfull_data(path_raw_data, path_merged_id_triplets)
+    # path_output = os.path.join(os.getcwd(),'documents_RAGBench', 'merged_id_triplets_no_duplicates.json')   
     # remove_duplicates_in_json(path, path_output)
-    chunks  = load_file(path_output)
-    vectore_store = create_vector_store(chunks)
+    # chunks  = load_file(path_output)
+    # vectore_store = create_vector_store(chunks)
     print("\n ingestion completed")
 
 if __name__ == "__main__":

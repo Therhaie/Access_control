@@ -21,6 +21,39 @@ retrieve function return n candidates with
 content, source (=triplet_index), page (=document_id), phrase_seq, bge_score (=similarity), rerank_score if 
 
 
+retrieving 20 chunks for the ground truth lead to a total of ~ 993 retrieve
+
+Scenario 1 :
+    Dataset used
+    - all chunk available
+    - all desired 'reached_chunk' are blocked
+    - all 'target_chunk' are blocked
+    
+    Metrics computed
+    - time to retrieve
+    -   include the rotation time of query and of adding dimensions, 
+
+    Methods for blocking
+    - rotation
+    - add dimension
+    - chroma methods or metadata filtering person
+
+remarques : 
+test scénario avec tous les documents bloqués
+calculer la distance moyenne intercluster pour s'assurer qu'on ne puisse pas reach des documents interdis meme si pas assez de documents à retrieve
+implémenter a minima pour le déterminer mais pas forcément le tester
+
+- plot pour afficher les clusters, afficher la distance entre les clusters, PCA (rotation pas de souci, add dimpension à voir)
+utiliser les 'targeted_chunk' 
+non targeted chunk 0 sur toutes les dimensions devraient se retrouver au milieu 
+[dans la partie résultats] nos méthodes produisent ces effets
+- tableau : overlap pour valider que les approches fonctions
+[ la sécurité est garantie ]
+- tableau : performance 
+[ comparaison des perfomances dans les résultats ]
+
+
+Scenario 2 :
 
 
 

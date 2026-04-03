@@ -73,7 +73,7 @@ RESULTS_DIR         = Path("results")
 # GT_FILE             = RESULTS_DIR / "ground_truth_retrievals.json"
 GT_FILE             = Path("documents_RAGBench/merged_id_triplets_with_metadata2.json")
 ROTATION_RESULTS    = RESULTS_DIR / "rotation_results.json"
-ROTATION_REGISTRY_F = RESULTS_DIR / "rotation_registry.json"
+ROTATION_REGISTRY_F = RESULTS_DIR / "rotation_registry_copy.json"
 
 ORIGINAL_CHROMA     = os.path.join(os.getcwd(), "./chroma_db")
 ROTATED_CHROMA      = os.path.join(os.getcwd(), "./chroma_rotated_db")
@@ -234,38 +234,6 @@ def fetch_original_vector(
         warnings.warn(f"fetch_original_vector failed for {triplet_index}|{document_id}|{phrase_seq}: {e}")
     return None
 
-# def fetch_original_vector(
-#     collection,
-#     triplet_index: str,
-#     document_id: str,
-#     phrase_seq: str,
-# ):
-#     """
-#     Retrieve the stored embedding for a specific chunk.
-#     Returns None if not found.
-#     """
-#     try:
-#         result = collection.get(
-#             where={
-#                 "$and": [
-#                     {"triplet_index": {"$eq": triplet_index}},
-#                     {"document_id":   {"$eq": document_id}},
-#                     {"phrase_seq":    {"$eq": phrase_seq}},
-#                 ]
-#             },
-#             include=["embeddings"],
-#         )
-#         print("Debug result:", result)
-#         embeddings = result.get("embeddings", None)
-#         if embeddings and len(embeddings) > 0:
-#             return np.array(embeddings[0], dtype=np.float32)
-#         else:
-#             print("No embeddings found for filter.")
-#     except Exception as e:
-#         warnings.warn(f"fetch_original_vector failed for {triplet_index}|{document_id}|{phrase_seq}: {e}")
-#     return None
-
-
 def fetch_original_vector_content(
     collection,
     triplet_index: str,
@@ -366,6 +334,8 @@ class QueryExperimentResult:
     rotated_topk_ids:  list[str]    = field(default_factory=list)
     overlap_count:     int          = 0
     overlap_fraction:  float        = 0.0
+    overlap_rot_query_rot_db_target_list : int = 0
+    overlap_rot_query_normal_db_target_list : int = 0
 
     # Cross-query results
     cross_query_results: list[CrossQueryResult] = field(default_factory=list)
@@ -407,11 +377,11 @@ def run_query_experiment(
     question      = gt_record["question"] 
     query_id      = f'triplet_{gt_record["id_triplets"]}' # gt_record["query_id"] 
     triplet_index = gt_record["id_triplets"]
-    stable_chunks =  gt_record['reached_chunk'] # or gt_record['targeted_chunk'] depends on the experiment   # gt_record["stable_chunks"] #
+    stable_chunks =  gt_record['targeted_chunk'] # or gt_record['targeted_chunk'] 'reached_chunk' depends on the experiment   # gt_record["stable_chunks"] #
 
     if verbose:
         print(f"\n  Query: {question[:70]}…")
-        print(f"  Stable chunks: {len(stable_chunks)}")
+        print(f"  targeted chunks: {len(stable_chunks)}")
 
     # ── Embed the query ─────────────────────────────────────────────────────── good
     from query_pipeline import BGE_QUERY_PREFIX
@@ -549,9 +519,30 @@ def run_query_experiment(
     for m in rot_results["metadatas"][0]
         ]
 
+    rot_results_without_rot = rot_collection.query(
+    query_embeddings=[query_vec.tolist()],
+    n_results=min(top_k, max(1, rot_collection.count())),
+    include=["metadatas", "distances"],
+)
+    rotated_topk_ids_without_rot = [
+    f"{m.get('triplet_index','?')}|{m.get('document_id','?')}|{m.get('phrase_seq','?')}"
+    for m in rot_results_without_rot["metadatas"][0]
+        ]
+
     overlap_set      = set(original_topk_ids) & set(rotated_topk_ids)
     overlap_count    = len(overlap_set)
     overlap_fraction = overlap_count / max(len(original_topk_ids), 1)
+    
+    # ── get the overlap between the query within the rotated space and the classical embedding space ─────────────────────────────────
+
+    # print the number of targeted chunk in the top-k retrieved chunk for both original and rotated collection
+    list_stable_chunk_id = [f"{triplet_index}|{chunk_id[-2]}|{chunk_id[-1]}" for chunk_id in stable_chunks] # [f"{c['triplet_index']}|{c['document_id']}|{c['phrase_seq']}" for c in stable_chunks]
+    
+    overlap_rot_query_rot_db_target_list = sum(1 for cid in rotated_topk_ids if cid in list_stable_chunk_id)
+    print(f" Overlap between rot query in rot db and targeted chunk {overlap_rot_query_rot_db_target_list}/{len(list_stable_chunk_id)}")
+    overlap_rot_query_normal_db_target_list = sum(1 for cid in rotated_topk_ids_without_rot if cid in list_stable_chunk_id)
+    print(f" Overlap between rot query in normal db and targeted chunk {overlap_rot_query_normal_db_target_list}/{len(list_stable_chunk_id)}")
+
     # skipping the cross-query experiement as it will take a lot of time
     # # ── Cross-query experiment ────────────────────────────────────────────────
     # # Pick n_cross_queries foreign queries (different triplet_index)
@@ -626,6 +617,9 @@ def run_query_experiment(
         overlap_count       = overlap_count,
         overlap_fraction    = overlap_fraction,
         cross_query_results = cross_results,
+        overlap_rot_query_rot_db_target_list = overlap_rot_query_rot_db_target_list,
+        overlap_rot_query_normal_db_target_list = overlap_rot_query_normal_db_target_list,
+
     )
 
 
