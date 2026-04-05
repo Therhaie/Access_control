@@ -392,13 +392,6 @@ def run_query_experiment(
 
     # ── Discover groups and assign rotations ────────────────────────────────── incomplete lack phase_seq
     # No longer needed as the list of targeted chunk already ensure that there are no chunk with multiple metadata tag
-    
-    # groups_in_query: set[str] = set()
-    # for chunk in stable_chunks:
-    #     tid = chunk["triplet_index"]
-    #     did = chunk["document_id"]
-    #     registry.get_or_create(tid, did)   # registers if new
-    #     groups_in_query.add(_group_key(tid, did))
 
     # if verbose:
     #     print(f"  Distinct rotation groups: {len(groups_in_query)}")
@@ -431,9 +424,6 @@ def run_query_experiment(
         if orig_vec is None:
             # Fall back to re-embedding the content
             print(f"  ⚠  Original vector not found for chunk {ckey} — re-embedding.")
-            # orig_vec = np.array(
-            #     embedder.embed_documents([chunk["content"]])[0], dtype=np.float32
-            # )
 
         # ── Apply rotation to chunk ─────────────────────────────────────────── good assumed
         rot_vec = apply_rotation(orig_vec, R)
@@ -485,29 +475,6 @@ def run_query_experiment(
         for m in orig_results["metadatas"][0]
     ]
 
-    # Rotated collection: we have one rotation per group — query each group
-    # separately then merge, or use the mean rotation.  We choose mean rotation
-    # as a single representative query vector for the rotated space.
-    # group_keys = list(groups_in_query)
-    # if group_keys:
-    #     rot_query_vecs = np.stack([
-    #         apply_rotation(query_vec, registry.get_or_create(*gk.split("|")))
-    #         for gk in group_keys
-    #     ])
-    #     mean_rot_query = rot_query_vecs.mean(axis=0)
-    #     mean_rot_query /= np.linalg.norm(mean_rot_query) + 1e-10
-
-    #     rot_results = rot_collection.query(
-    #         query_embeddings=[mean_rot_query.tolist()],
-    #         n_results=min(top_k, max(1, rot_collection.count())),
-    #         include=["metadatas", "distances"],
-    #     )
-    #     rotated_topk_ids = [
-    #         f"{m.get('triplet_index','?')}|{m.get('document_id','?')}|{m.get('phrase_seq','?')}"
-    #         for m in rot_results["metadatas"][0]
-    #     ]
-    # else:
-    #     rotated_topk_ids = []
 
     rot_results = rot_collection.query(
     query_embeddings=[rot_query_vec.tolist()],
@@ -543,58 +510,6 @@ def run_query_experiment(
     overlap_rot_query_normal_db_target_list = sum(1 for cid in rotated_topk_ids_without_rot if cid in list_stable_chunk_id)
     print(f" Overlap between rot query in normal db and targeted chunk {overlap_rot_query_normal_db_target_list}/{len(list_stable_chunk_id)}")
 
-    # skipping the cross-query experiement as it will take a lot of time
-    # # ── Cross-query experiment ────────────────────────────────────────────────
-    # # Pick n_cross_queries foreign queries (different triplet_index)
-    # foreign_records = [
-    #     r for r in all_gt_records
-    #     if r["triplet_index"] != triplet_index and r["stable_chunks"]
-    # ][:n_cross_queries]
-
-    # cross_results: list[CrossQueryResult] = []
-    # for foreign in foreign_records:
-    #     fq_vec = np.array(
-    #         embedder.embed_query(BGE_QUERY_PREFIX + foreign["question"]),
-    #         dtype=np.float32,
-    #     )
-    #     # For each group in the CURRENT query, apply its rotation to the foreign query
-    #     # and measure how that changes similarity to the group's rotated chunks
-    #     for gkey in groups_in_query:
-    #         tid_g, did_g = gkey.split("|")
-    #         R_g          = registry.get_or_create(tid_g, did_g)
-    #         rot_fq_vec   = apply_rotation(fq_vec, R_g)
-
-    #         # Find the chunks in this group that are in stable_chunks
-    #         group_chunks = [
-    #             c for c in stable_chunks
-    #             if _group_key(c["triplet_index"], c["document_id"]) == gkey
-    #         ]
-
-    #         for chunk in group_chunks[:3]:   # limit per group to keep results manageable
-    #             tid_c = chunk["triplet_index"]
-    #             did_c = chunk["document_id"]
-    #             pseq  = chunk["phrase_seq"]
-    #             ckey  = f"{tid_c}|{did_c}|{pseq}"
-
-    #             orig_c = fetch_original_vector(orig_collection, tid_c, did_c, pseq)
-    #             if orig_c is None:
-    #                 orig_c = np.array(
-    #                     embedder.embed_documents([chunk["content"]])[0], dtype=np.float32
-    #                 )
-    #             rot_c = apply_rotation(orig_c, R_g)
-
-    #             sim_before = cosine_similarity(fq_vec,     rot_c)
-    #             sim_after  = cosine_similarity(rot_fq_vec, rot_c)
-
-    #             cross_results.append(CrossQueryResult(
-    #                 foreign_query_id              = foreign["query_id"],
-    #                 foreign_question              = foreign["question"][:120],
-    #                 group_key                     = gkey,
-    #                 rotation_seed                 = registry._store[gkey]["seed"],
-    #                 chunk_key                     = ckey,
-    #                 sim_foreign_orig_vs_rot_chunk = sim_before,
-    #                 sim_foreign_rot_vs_rot_chunk  = sim_after,
-    #             ))
     cross_results = []  # Skipping cross-query experiment for now to keep results manageable
 
     if verbose:
@@ -661,9 +576,6 @@ def run_experiment(
         # print(f"\n[{i}/{len(gt_records)}] {record['query_id']}")
         print(f"\n[{i}/{len(gt_records)}] triplet_{record['id_triplets']}")
 
-        # if not record.get("stable_chunks"):
-        #     print("  ⚠  No stable chunks — skipping.")
-        #     continue
         if not record.get("id_triplets"):
             print("  ⚠  No stable chunks — skipping.")
             continue

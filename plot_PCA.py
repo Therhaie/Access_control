@@ -9,7 +9,8 @@ import random
 import os
 from sklearn.metrics.pairwise import cosine_similarity
 from matplotlib.colors import ListedColormap
-
+from sklearn.manifold import TSNE
+import umap.umap_ as umap
 
 
 # from torch import chunk
@@ -24,7 +25,10 @@ COLLECTION_NAME_ROTATION = "rotated_experiment"
 DIRECTORY_ROTATION_DB =  os.path.join(os.getcwd(), "./chroma_rotated_db")
 COLLECTION_NAME_BASELINE = 'baseline_db'
 DIRECTORY_BASELINE_DB = os.path.join(os.getcwd(), "./chroma_db")
-SAVE_PATH = os.path.join(os.getcwd(),"plot" ,"./pca_clusters_rotation.png")
+SAVE_DIR = os.path.join(os.getcwd(), "plots")
+
+# ensure directory for saving plots exists
+os.makedirs(SAVE_DIR, exist_ok=True)
 
 
 def get_all_chunk_ids(data) -> List[str]:
@@ -41,12 +45,6 @@ def get_all_chunk_ids(data) -> List[str]:
     #         phrase_seq = sentence[-1]
     #         chunk_ids.append(f"{id_triplets}|{document_id}|{phrase_seq}")
     return chunk_ids
-
-
-# def get_id_targeted_chunk(data, id_triplet: str) -> List[str]:
-#         for chunk in data:
-#             if chunk["id_triplets"] == id_triplet:
-#                 return [f'{chunk_id.split("|")[0]}|{chunk_id[-2]}|{chunk_id[-1]}' for chunk_id in chunk.get("targeted_chunk", [])]
 
 def get_list_id_targeted_chunk(data) -> List[str]:
     list_of_chunk_ids = []
@@ -128,102 +126,12 @@ def fetch_embeddings(
 
     return np.array(embeddings, dtype=np.float32)
 
-# Apply PCA and plot
-# def plot_pca(
-#     embeddings: np.ndarray,
-#     labels: List[str],
-#     title: str,
-#     n_components: int = 2,
-#     save_path: Optional[str] = None,
-# ):
-#     pca = PCA(n_components=n_components)
-#     reduced_embeddings = pca.fit_transform(embeddings)
-
-#     plt.figure(figsize=(10, 8))
-#     if n_components == 2:
-#         plt.scatter(reduced_embeddings[:, 0], reduced_embeddings[:, 1], c=labels, cmap="viridis", alpha=0.6)
-#         plt.xlabel("PCA Component 1")
-#         plt.ylabel("PCA Component 2")
-#     else:
-#         ax = plt.axes(projection="3d")
-#         ax.scatter3D(
-#             reduced_embeddings[:, 0],
-#             reduced_embeddings[:, 1],
-#             reduced_embeddings[:, 2],
-#             c=labels,
-#             cmap="viridis",
-#             alpha=0.6,
-#         )
-#         ax.set_xlabel("PCA Component 1")
-#         ax.set_ylabel("PCA Component 2")
-#         ax.set_zlabel("PCA Component 3")
-
-#     plt.title(title)
-#     plt.colorbar(label="Cluster ID")
-#     if save_path:
-#         plt.savefig(save_path, dpi=300, bbox_inches="tight")
-#     plt.show()
-# region
-    # # Flatten points and build labels
-    # all_points = []
-    # cluster_labels = []
-    # for cluster_idx, cluster in enumerate(cluster_embeddings):
-    #     for point in cluster:
-    #         all_points.append(point)
-    #         cluster_labels.append(cluster_idx)
-    # all_points = np.vstack(all_points)
-
-    # # PCA reduction
-    # pca = PCA(n_components=n_components)
-    # reduced = pca.fit_transform(all_points)
-
-    # n_clusters = len(cluster_embeddings)
-    # cmap_name = "tab10" if n_clusters <= 10 else "tab20"
-    # cmap = plt.get_cmap(cmap_name)
-
-    # plt.figure(figsize=(10, 8))
-    # # Plot scatter, store the indices so we know which cluster each point belongs to
-    # if n_components == 2:
-    #     scatter = plt.scatter(
-    #         reduced[:, 0], reduced[:, 1],
-    #         c=cluster_labels, cmap=cmap_name, alpha=0.6
-    #     )
-    #     plt.xlabel("PCA Component 1")
-    #     plt.ylabel("PCA Component 2")
-    # else:
-    #     ax = plt.axes(projection="3d")
-    #     scatter = ax.scatter3D(
-    #         reduced[:, 0], reduced[:, 1], reduced[:, 2],
-    #         c=cluster_labels, cmap=cmap_name, alpha=0.6
-    #     )
-    #     ax.set_xlabel("PCA Component 1")
-    #     ax.set_ylabel("PCA Component 2")
-    #     ax.set_zlabel("PCA Component 3")
-
-    # plt.title(title)
-
-    # # Legend: Use same colors (by index) as the plotted points
-    # legend_labels = [f"Cluster {i}" for i in range(n_clusters - 1)] + ["Untargeted"]
-    # handles = [
-    #     plt.Line2D(
-    #         [0], [0], marker='o', color='w',
-    #         markerfacecolor=cmap(i), markersize=12, label=legend_labels[i]
-    #     )
-    #     for i in range(n_clusters)
-    # ]
-    # plt.legend(handles, legend_labels, title="Cluster")
-
-    # if save_path:
-    #     plt.savefig(save_path, dpi=300, bbox_inches="tight")
-    # plt.show()
-#endregion
-
-
 
 def plot_pca(
     cluster_embeddings: List[List[np.ndarray]],
     title: str,
     n_components: int = 2,
+    method: str = "pca",
     save_path: Optional[str] = None,
 ):
     # Flatten points and build labels
@@ -238,9 +146,20 @@ def plot_pca(
 
     all_points = np.vstack(all_points)
 
+        # Dimensionality reduction
+    if method == "pca":
+        reducer = PCA(n_components=n_components)
+    elif method == "umap":
+        reducer = umap.UMAP(n_components=n_components, random_state=SEED)
+    elif method == "tsne":
+        reducer = TSNE(n_components=n_components, random_state=SEED)
+    else:
+        raise ValueError(f"Unknown method: {method}")
+
     # PCA reduction
-    pca = PCA(n_components=n_components)
-    reduced = pca.fit_transform(all_points)
+    # pca = PCA(n_components=n_components)
+    # reduced = pca.fit_transform(all_points)
+    reduced = reducer.fit_transform(all_points)
 
     n_clusters = len(cluster_embeddings)
 
@@ -256,17 +175,17 @@ def plot_pca(
             reduced[:, 0], reduced[:, 1],
             c=cluster_labels, cmap=custom_map, alpha=0.6
         )
-        plt.xlabel("PCA Component 1")
-        plt.ylabel("PCA Component 2")
+        plt.xlabel(f"{method.upper()} Component 1")
+        plt.ylabel(f"{method.upper()} Component 2")
     else:
         ax = plt.axes(projection="3d")
         scatter = ax.scatter3D(
             reduced[:, 0], reduced[:, 1], reduced[:, 2],
             c=cluster_labels, cmap=custom_map, alpha=0.6
         )
-        ax.set_xlabel("PCA Component 1")
-        ax.set_ylabel("PCA Component 2")
-        ax.set_zlabel("PCA Component 3")
+        ax.set_xlabel(f"{method.upper()} Component 1")
+        ax.set_ylabel(f"{method.upper()} Component 2")
+        ax.set_zlabel(f"{method.upper()} Component 3")
 
     plt.title(title)
 
@@ -309,22 +228,6 @@ def plot_pca(
                     fontsize=8, color="black", weight="bold"
                 )
 
-    # Compute and annotate pairwise cosine similarity between cluster centers
-    # cluster_centers = np.array([np.mean(cluster, axis=0) for cluster in cluster_embeddings])
-    # # potentially error need to iterate over pairs of cluster centers
-    # cos_sim = cosine_similarity(cluster_centers)
-
-    # # Annotate the plot with pairwise distances
-    # for i in range(n_clusters):
-    #     for j in range(i + 1, n_clusters):
-    #         x1, y1 = reduced[cluster_labels == i].mean(axis=0)
-    #         x2, y2 = reduced[cluster_labels == j].mean(axis=0)
-    #         plt.annotate(
-    #             f"{cos_sim[i, j]:.2f}",
-    #             xy=((x1 + x2) / 2, (y1 + y2) / 2),
-    #             fontsize=8, color="red", weight="bold"
-    #         )
-
     if save_path:
         plt.savefig(save_path, dpi=300, bbox_inches="tight")
     plt.show()
@@ -332,6 +235,8 @@ def plot_pca(
 
 # Example usage
 if __name__ == "__main__":
+    random.seed(SEED)
+    np.random.seed(SEED)
     # Load the JSON file with targeted chunks
     with open("documents_RAGBench/merged_id_triplets_with_metadata2.json", "r", encoding="utf-8") as f:
         data = json.load(f)
@@ -342,11 +247,6 @@ if __name__ == "__main__":
     list_of_untargeted_chunk_ids = get_id_untargeted_chunk(data) # List[List[str]]
     list_of_cluster_ids = get_id_clusters(data) # List[str]
 
-    # targeted_chunks = get_id_targeted_chunk(data, "your_query_id_here")  
-        
-    # Select a query and its targeted chunks
-    # query_id = "your_query_id_here"  # Replace with a valid query ID from your JSON
-    # targeted_chunks = get_targeted_chunks(query_id)
 
     list_of_cluster_embeddings = []
     for e in list_of_cluster_ids:
@@ -368,17 +268,8 @@ if __name__ == "__main__":
 
     list_of_cluster_embeddings.append(list_of_targeted_chunk_embeddings)
 
-    # to makes things easier append list_of_targeted_chunk_embeddings to list_of_cluster_embeddings
-
-    # Assign labels (e.g., cluster IDs or targeted vs. non-targeted)
-    # labels = np.arange(len(targeted_chunks))  # Simple numeric labels for clusters
-    plot_pca(list_of_cluster_embeddings, title="PCA of Clusters", n_components=2, save_path="pca_clusters.png")
 
 
-    # # Plot PCA
-    # plot_pca(
-    #     embeddings=rotated_embeddings,
-    #     labels=labels,
-    #     title=f"PCA of Rotated Embeddings for Query {query_id}",
-    #     save_path="pca_rotated.png",
-    # )
+    method = "pca"  # Choose between "pca", "umap", or "tsne"
+    save_path = os.path.join(SAVE_DIR, f"{method}_clusters.png")
+    plot_pca(list_of_cluster_embeddings, title=f"Clusters representation using {method.upper()}, seed : {SEED}", n_components=2, method=method, save_path=save_path)

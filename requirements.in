@@ -9,4 +9,5 @@ sentence_transformers
 matplotlib
 pandas
 seaborn
-sklearn
+scikit-learn
+umap-learn
