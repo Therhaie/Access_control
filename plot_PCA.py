@@ -7,15 +7,25 @@ import matplotlib.pyplot as plt
 from typing import List, Optional
 import random
 import os
+from sklearn.metrics.pairwise import cosine_similarity
+from matplotlib.colors import ListedColormap
+
+
 
 # from torch import chunk
 
 NUMBER_OF_COMPONENTS = 2  # Change to 3 for 3D PCA
-NUMBER_OF_CLUSTERS_DISPLAYED = 2  # Limit the number of chunks displayed for clarity
-NUMBER_OF_UNTARGETED_CHUNKS_DISPLAYED = 20  # Limit the number of untargeted chunks displayed for clarity
+NUMBER_OF_CLUSTERS_DISPLAYED = 3  # Limit the number of chunks displayed for clarity
+NUMBER_OF_UNTARGETED_CHUNKS_DISPLAYED = 40  # Limit the number of untargeted chunks displayed for clarity
 SEED = 42  # For reproducibility
-COLLECTION_NAME = "rotated_experiment"
+
+
+COLLECTION_NAME_ROTATION = "rotated_experiment"
 DIRECTORY_ROTATION_DB =  os.path.join(os.getcwd(), "./chroma_rotated_db")
+COLLECTION_NAME_BASELINE = 'baseline_db'
+DIRECTORY_BASELINE_DB = os.path.join(os.getcwd(), "./chroma_db")
+SAVE_PATH = os.path.join(os.getcwd(),"plot" ,"./pca_clusters_rotation.png")
+
 
 def get_all_chunk_ids(data) -> List[str]:
     chunk_ids : List[str] = []
@@ -97,26 +107,22 @@ def fetch_embeddings(
         triplet_index = str(chunk_id.split("|")[0])
         document_id = str(chunk_id.split("|")[1])
         phrase_seq = str(chunk_id.split("|")[2])
-        # result = collection.get(
-        #     where={
-        #         "$and": [
-        #             {"triplet_index": {"$eq": triplet_index}},
-        #             {"document_id": {"$eq": document_id}},
-        #             {"phrase_seq": {"$eq": phrase_seq}},
-        #         ]
-        #     },
-        #     include=["embeddings"],
-        # )
-        result = collection.get(
-            where={
-                "$and": [
-                    {"triplet_index": {"$eq": triplet_index}},
-                    {"document_id":   {"$eq": document_id}},
-                    {"phrase_seq":    {"$eq": phrase_seq}},
-                ]
-            },
-            include=["embeddings"],
-        )
+        
+        chroma_id = f"{triplet_index}_{document_id}_{phrase_seq}"
+        if collection_path == DIRECTORY_ROTATION_DB :
+            result = collection.get(ids=[chroma_id], include=["embeddings"])
+        elif collection_path == DIRECTORY_BASELINE_DB:
+            result = collection.get(
+                where={
+                    "$and": [
+                        {"triplet_index": {"$eq": triplet_index}},
+                        {"document_id":   {"$eq": document_id}},
+                        {"phrase_seq":    {"$eq": phrase_seq}},
+                    ]
+                },
+                include=["embeddings"],
+            )
+
         if len(result["embeddings"][0]) > 0:
             embeddings.append(result["embeddings"][0])
 
@@ -157,6 +163,62 @@ def fetch_embeddings(
 #     if save_path:
 #         plt.savefig(save_path, dpi=300, bbox_inches="tight")
 #     plt.show()
+# region
+    # # Flatten points and build labels
+    # all_points = []
+    # cluster_labels = []
+    # for cluster_idx, cluster in enumerate(cluster_embeddings):
+    #     for point in cluster:
+    #         all_points.append(point)
+    #         cluster_labels.append(cluster_idx)
+    # all_points = np.vstack(all_points)
+
+    # # PCA reduction
+    # pca = PCA(n_components=n_components)
+    # reduced = pca.fit_transform(all_points)
+
+    # n_clusters = len(cluster_embeddings)
+    # cmap_name = "tab10" if n_clusters <= 10 else "tab20"
+    # cmap = plt.get_cmap(cmap_name)
+
+    # plt.figure(figsize=(10, 8))
+    # # Plot scatter, store the indices so we know which cluster each point belongs to
+    # if n_components == 2:
+    #     scatter = plt.scatter(
+    #         reduced[:, 0], reduced[:, 1],
+    #         c=cluster_labels, cmap=cmap_name, alpha=0.6
+    #     )
+    #     plt.xlabel("PCA Component 1")
+    #     plt.ylabel("PCA Component 2")
+    # else:
+    #     ax = plt.axes(projection="3d")
+    #     scatter = ax.scatter3D(
+    #         reduced[:, 0], reduced[:, 1], reduced[:, 2],
+    #         c=cluster_labels, cmap=cmap_name, alpha=0.6
+    #     )
+    #     ax.set_xlabel("PCA Component 1")
+    #     ax.set_ylabel("PCA Component 2")
+    #     ax.set_zlabel("PCA Component 3")
+
+    # plt.title(title)
+
+    # # Legend: Use same colors (by index) as the plotted points
+    # legend_labels = [f"Cluster {i}" for i in range(n_clusters - 1)] + ["Untargeted"]
+    # handles = [
+    #     plt.Line2D(
+    #         [0], [0], marker='o', color='w',
+    #         markerfacecolor=cmap(i), markersize=12, label=legend_labels[i]
+    #     )
+    #     for i in range(n_clusters)
+    # ]
+    # plt.legend(handles, legend_labels, title="Cluster")
+
+    # if save_path:
+    #     plt.savefig(save_path, dpi=300, bbox_inches="tight")
+    # plt.show()
+#endregion
+
+
 
 def plot_pca(
     cluster_embeddings: List[List[np.ndarray]],
@@ -164,43 +226,105 @@ def plot_pca(
     n_components: int = 2,
     save_path: Optional[str] = None,
 ):
-    # Flatten all points and build cluster labels
+    # Flatten points and build labels
     all_points = []
     cluster_labels = []
     for cluster_idx, cluster in enumerate(cluster_embeddings):
         for point in cluster:
             all_points.append(point)
             cluster_labels.append(cluster_idx)
-    all_points = np.vstack(all_points)  # shape: (N_total, D)
+        all_points.append(np.mean(cluster, axis=0))
+        cluster_labels.append(NUMBER_OF_CLUSTERS_DISPLAYED + 1)  # Label for cluster center
+
+    all_points = np.vstack(all_points)
+
     # PCA reduction
     pca = PCA(n_components=n_components)
     reduced = pca.fit_transform(all_points)
-    
+
+    n_clusters = len(cluster_embeddings)
+
+    # Color map definition
+    colors = ["red", "blue", "green", "yellow", "purple", "magenta", "yellow", "brown", "pink"]
+    colors_used = colors[:n_clusters-1] + ["gray"] + ["black"] # untargeted cluster in gray and cluster centers in black
+    custom_map = ListedColormap(colors_used)  
+
     plt.figure(figsize=(10, 8))
-    # Choose colors: One color per cluster
-    colors = plt.cm.tab10(cluster_labels) if max(cluster_labels) < 10 else plt.cm.tab20(cluster_labels)
+    # Plot scatter
     if n_components == 2:
-        plt.scatter(reduced[:, 0], reduced[:, 1], c=cluster_labels, cmap="tab10", alpha=0.6)
+        scatter = plt.scatter(
+            reduced[:, 0], reduced[:, 1],
+            c=cluster_labels, cmap=custom_map, alpha=0.6
+        )
         plt.xlabel("PCA Component 1")
         plt.ylabel("PCA Component 2")
     else:
         ax = plt.axes(projection="3d")
         scatter = ax.scatter3D(
-            reduced[:, 0],
-            reduced[:, 1],
-            reduced[:, 2],
-            c=cluster_labels,
-            cmap="tab10" if max(cluster_labels) < 10 else "tab20",
-            alpha=0.6,
+            reduced[:, 0], reduced[:, 1], reduced[:, 2],
+            c=cluster_labels, cmap=custom_map, alpha=0.6
         )
         ax.set_xlabel("PCA Component 1")
         ax.set_ylabel("PCA Component 2")
         ax.set_zlabel("PCA Component 3")
+
     plt.title(title)
-    # Legend for clusters
-    handles = [plt.Line2D([0], [0], marker='o', color='w', markerfacecolor=plt.cm.tab10(i), markersize=12) 
-               for i in range(max(cluster_labels)+1)]
-    plt.legend(handles, [f"Cluster {i}" for i in range(max(cluster_labels)+1)], title="Cluster")
+
+    # Legend: Use same colors (by index) as the plotted points
+    legend_labels = [f"Cluster {i}" for i in range(n_clusters - 1)] + ["Untargeted"] + ["Cluster Center"]
+    handles = [
+        plt.Line2D(
+            [0], [0], marker='o', color='w',
+            markerfacecolor=custom_map(i), markersize=12, label=legend_labels[i]
+        )
+        for i in range(NUMBER_OF_CLUSTERS_DISPLAYED + 2)  # range(n_clusters)
+    ]
+
+    distance_handle = plt.Line2D(
+        [0], [0], color='black', linestyle='--', label='Distance : Cosine Similarity'
+    )
+    handles.append(distance_handle)
+    legend_labels.append('Distance : Cosine Similarity')
+
+    plt.legend(handles, legend_labels, title="Clusters")
+
+    # Access the cluster centers 
+    center_label = NUMBER_OF_CLUSTERS_DISPLAYED + 1
+    # center_indices = (cluster_labels == center_label)
+    center_indices = [i for i, label in enumerate(cluster_labels) if label == center_label]
+    cluster_centers_pca = reduced[center_indices]     
+    
+    for x in cluster_centers_pca:
+        x_idx = int(np.where((reduced == x).all(axis=1))[0])  # Find the index of the cluster center in the reduced space
+        for y  in cluster_centers_pca:
+            y_idx = int(np.where((reduced == y).all(axis=1))[0]) # Find the index of the other cluster center in the reduced space
+            if not np.array_equal(x, y):
+                plt.plot([x[0], y[0]], [x[1], y[1]], color="black", linestyle="--", alpha=0.5)
+                x_embedding = all_points[x_idx]
+                y_embedding = all_points[y_idx]
+                cos_sim = float(cosine_similarity([x_embedding], [y_embedding]))
+                plt.annotate(
+                    f"Distance: {cos_sim:.2f}",
+                    xy=((x[0] + y[0]) / 2, (x[1] + y[1]) / 2),
+                    fontsize=8, color="black", weight="bold"
+                )
+
+    # Compute and annotate pairwise cosine similarity between cluster centers
+    # cluster_centers = np.array([np.mean(cluster, axis=0) for cluster in cluster_embeddings])
+    # # potentially error need to iterate over pairs of cluster centers
+    # cos_sim = cosine_similarity(cluster_centers)
+
+    # # Annotate the plot with pairwise distances
+    # for i in range(n_clusters):
+    #     for j in range(i + 1, n_clusters):
+    #         x1, y1 = reduced[cluster_labels == i].mean(axis=0)
+    #         x2, y2 = reduced[cluster_labels == j].mean(axis=0)
+    #         plt.annotate(
+    #             f"{cos_sim[i, j]:.2f}",
+    #             xy=((x1 + x2) / 2, (y1 + y2) / 2),
+    #             fontsize=8, color="red", weight="bold"
+    #         )
+
     if save_path:
         plt.savefig(save_path, dpi=300, bbox_inches="tight")
     plt.show()
@@ -228,7 +352,7 @@ if __name__ == "__main__":
     for e in list_of_cluster_ids:
         embedding = fetch_embeddings(
             collection_path=DIRECTORY_ROTATION_DB,
-            collection_name=COLLECTION_NAME,
+            collection_name=COLLECTION_NAME_ROTATION,
             chunk_ids=[e][0],
             is_rotated=False,
         )
@@ -236,8 +360,8 @@ if __name__ == "__main__":
 
     # Fetch embeddings from the rotated collection
     list_of_targeted_chunk_embeddings = fetch_embeddings(
-        collection_path=DIRECTORY_ROTATION_DB,
-        collection_name=COLLECTION_NAME,
+        collection_path=DIRECTORY_BASELINE_DB,
+        collection_name=COLLECTION_NAME_BASELINE,
         chunk_ids=list_of_untargeted_chunk_ids,
         is_rotated=True,
     )
@@ -248,7 +372,7 @@ if __name__ == "__main__":
 
     # Assign labels (e.g., cluster IDs or targeted vs. non-targeted)
     # labels = np.arange(len(targeted_chunks))  # Simple numeric labels for clusters
-    plot_pca(list_of_cluster_embeddings, title="PCA of Clusters", n_components=2)
+    plot_pca(list_of_cluster_embeddings, title="PCA of Clusters", n_components=2, save_path="pca_clusters.png")
 
 
     # # Plot PCA
