@@ -12,3 +12,4 @@ chroma_rotated_db/
 chroma_dim_db/
 *.png
 todo.txt
+logs/
