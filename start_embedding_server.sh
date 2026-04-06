@@ -23,6 +23,6 @@ echo "Starting embedding server on :8001..."
 #     --port 8001
 
 vllm serve BAAI/bge-large-en-v1.5\
-    --gpu-memory-utilization 0.3 \
+    --gpu-memory-utilization 0.1 \
     --host 0.0.0.0 \
     --port 8001
