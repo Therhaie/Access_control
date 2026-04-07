@@ -109,7 +109,7 @@ TIMING_FILE       = LOGS_DIR    / f"dim_timing_largeval_{DEFAULT_LARGE_VAL}_topk
 ORIGINAL_CHROMA     = os.path.join(os.getcwd(), "./chroma_db")
 ORIGINAL_COLLECTION = COLLECTION
 AUG_CHROMA_BASE     = os.path.join(os.getcwd(), "./chroma_aug_db")
-AUGMENTED_NAME     = "augmented_db_norm"
+AUGMENTED_NAME     = "augmented_db_norm_high_value_encoding_l2_space"  # collection name prefix for augmented DB (one per config)
 META_CHROMA_BASE    = os.path.join(os.getcwd(), "./chroma_meta_db")
 META_NAME           = "meta_access_control"
 
@@ -296,6 +296,7 @@ def augment_chunk(
     base_vec:    np.ndarray,
     cfg:         ExtraDimConfig,
     query_index: int | None,
+    untargeted:   bool = False,
 ) -> np.ndarray:
     """
     Append N extra dims to a chunk vector.
@@ -303,10 +304,14 @@ def augment_chunk(
     None        : non-targeted chunk — all extra dims are zero.
     """
     extra = np.zeros(cfg.n_queries, dtype=np.float32)
-    extra.fill(DEFAULT_LARGE_VAL)
+    # extra.fill(DEFAULT_LARGE_VAL)
+    if untargeted:
+        # all-zero extra dims → non-targeted chunk
+        return _l2_norm(np.concatenate([base_vec.astype(np.float32), extra])) if cfg.normalize_after else np.concatenate([base_vec.astype(np.float32), extra])
+
     if query_index is not None:
         # extra[query_index] = cfg.large_value
-        extra[query_index] = 0
+        extra[query_index] = DEFAULT_LARGE_VAL
 
     aug = np.concatenate([base_vec.astype(np.float32), extra])
     return _l2_norm(aug) if cfg.normalize_after else aug
@@ -324,10 +329,10 @@ def augment_query(
     authorised=False → all-zero extra dims               (diverges from own chunks)
     """
     extra = np.zeros(cfg.n_queries, dtype=np.float32)
-    extra.fill(DEFAULT_LARGE_VAL)
+    # extra.fill(DEFAULT_LARGE_VAL)
     if authorised:
         # extra[query_index] = cfg.large_value
-        extra[query_index] = 0
+        extra[query_index] = DEFAULT_LARGE_VAL
 
     aug = np.concatenate([base_vec.astype(np.float32), extra])
     return _l2_norm(aug) if cfg.normalize_after else aug
@@ -355,13 +360,13 @@ def _get_original_collection(path: str, name: str):
 
 def _get_aug_collection(cfg_id: str, name: str=AUGMENTED_NAME):
     return _get_client(AUG_CHROMA_BASE).get_or_create_collection(
-        name=f"{name}_{DEFAULT_LARGE_VAL}", metadata={"hnsw:space": "cosine"}
+        name=f"{name}_{DEFAULT_LARGE_VAL}", metadata={"hnsw:space": "l2"}
     )
 
 
 def _get_meta_collection():
     return _get_client(META_CHROMA_BASE).get_or_create_collection(
-        name="meta_access_control", metadata={"hnsw:space": "cosine"}
+        name="meta_access_control", metadata={"hnsw:space": "l2"}
     )
 
 
@@ -533,7 +538,7 @@ def _build_aug_db_all_untargeted_chunks(
             warnings.warn(f"  ⚠  Build(aug): chunk not found {chunk_id} — skipping.")
             continue
 
-        aug_vec = augment_chunk(base_vec, cfg, query_index=None)  # query_index = None -> non-targeted
+        aug_vec = augment_chunk(base_vec, cfg, query_index=None, untargeted=True)  # query_index = None -> non-targeted
         aug_collection.upsert(
             ids        = [cid],
             embeddings = [aug_vec.tolist()],
@@ -554,7 +559,6 @@ def _build_aug_db_all_untargeted_chunks(
             print(f"  Augmented untargeted chunk {chunk_id} → {cid}")
 
     return n_ok
-
 
 
 @timed("build_aug_db_single_record")
@@ -800,17 +804,27 @@ def _query_record(
     n_aug = max(1, aug_collection.count())
 
     t0 = time.perf_counter()
+    # aug_res_auth = aug_collection.query(
+    #     query_embeddings=[auth_q.tolist()],
+    #     n_results=min(top_k, n_aug),
+    #     include=["metadatas"],
+    # )
     aug_res_auth = aug_collection.query(
         query_embeddings=[auth_q.tolist()],
-        n_results=min(top_k, n_aug),
+        n_results=n_aug*2,
         include=["metadatas"],
     )
     t_q_aug_a = time.perf_counter() - t0
 
     t0 = time.perf_counter()
+    # aug_res_unauth = aug_collection.query(
+    #     query_embeddings=[unauth_q.tolist()],
+    #     n_results=min(top_k, n_aug),
+    #     include=["metadatas"],
+    # )
     aug_res_unauth = aug_collection.query(
         query_embeddings=[unauth_q.tolist()],
-        n_results=min(top_k, n_aug),
+        n_results=n_aug*2,
         include=["metadatas"],
     )
     t_q_aug_u = time.perf_counter() - t0
@@ -1095,7 +1109,7 @@ def run_experiment(
 
     # Phase 1
     build_aug_db(gt_records, cfg, orig_coll, aug_coll, verbose=verbose)
-    build_meta_db(gt_records, orig_coll, meta_coll, verbose=verbose)
+    # build_meta_db(gt_records, orig_coll, meta_coll, verbose=verbose)
 
     # build_aug_db(gt_records, cfg, orig_coll, aug_coll, verbose=False)
     # build_meta_db(gt_records, orig_coll, meta_coll, verbose=False)
@@ -1103,8 +1117,8 @@ def run_experiment(
     # add the untargeted chunks to the augmented DB (Method 2)
     written_ids: set[str] = set()
     _build_aug_db_all_untargeted_chunks(gt_records, cfg, orig_coll, aug_coll, written_ids)
-    written_ids: set[str] = set()
-    build_meta_db_add_untargeted_chunks(gt_records, orig_coll, meta_coll, written_ids)
+    # written_ids: set[str] = set()
+    # build_meta_db_add_untargeted_chunks(gt_records, orig_coll, meta_coll, written_ids)
 
     # Phase 2
     raw_results = run_query_phase(

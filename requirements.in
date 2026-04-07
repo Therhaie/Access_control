@@ -11,3 +11,5 @@ pandas
 seaborn
 scikit-learn
 umap-learn
+notebook
+plotly

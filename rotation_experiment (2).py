@@ -63,6 +63,8 @@ from config import COLLECTION
 from ingestion_pipeline import get_embedding_model
 from query_pipeline import BGE_QUERY_PREFIX
 
+from plot_PCA import get_all_chunk_ids, get_list_id_targeted_chunk
+
 # ── Paths ──────────────────────────────────────────────────────────────────────
 LOGS_DIR            = Path("logs")
 RESULTS_DIR         = Path("results")
@@ -72,7 +74,7 @@ ROTATION_REGISTRY_F = RESULTS_DIR / "rotation_registry.json"
 TIMING_FILE         = LOGS_DIR    / "rotation_timing.json"
 
 ORIGINAL_CHROMA     = os.path.join(os.getcwd(), "./chroma_db")
-ROTATED_CHROMA      = os.path.join(os.getcwd(), "./chroma_rotated_db")
+ROTATED_CHROMA      = os.path.join(os.getcwd(), "./chroma_rotated_db_log")
 ORIGINAL_COLLECTION = COLLECTION
 ROTATED_COLLECTION  = "rotated_experiment"
 
@@ -323,7 +325,7 @@ def fetch_chunk(
         )
         embs = result.get("embeddings", [[]])
         docs = result.get("documents", [[]])
-        if embs and len(embs[0]) > 0:
+        if len(embs[0]) > 0:
             return np.array(embs[0], dtype=np.float32), (docs[0] if docs else None)
     except Exception as e:
         warnings.warn(f"fetch_chunk failed for {triplet_index}|{document_id}|{phrase_seq}: {e}")
@@ -419,6 +421,117 @@ class QueryEvalResult:
 # ═══════════════════════════════════════════════════════════════════════════════
 # 5.  Phase 1 — Build the rotated database
 # ═══════════════════════════════════════════════════════════════════════════════
+
+# @timed("build_rotated_db_all_untargeted_chunks")
+# def _build_rotated_db_all_untargeted_chunks(
+#     gt_records:     list[dict],
+#     cfg:            ExtraDimConfig,
+#     orig_collection,
+#     aug_collection,
+#     written_ids:    set[str],
+#     verbose:        bool = True,
+# ) -> int:
+#     """
+#     Augment and upsert all untargeted chunks for all GT records (Method 2).
+#     This is a fallback to ensure that every chunk in the original DB is present
+#     in the augmented DB with some augmentation state (targeted or non-targeted).
+#     """
+#     n_ok = 0
+
+#     # get the id of all chunks
+#     untargeted_chunks = []
+#     list_of_chunk_ids = get_all_chunk_ids(gt_records)
+#     list_of_targeted_chunk_ids = get_list_id_targeted_chunk(gt_records)
+#     for chunk_id in list_of_chunk_ids:
+#         if chunk_id not in list_of_targeted_chunk_ids:
+#             untargeted_chunks.append(chunk_id)
+
+#     for chunk_id in untargeted_chunks:
+#         tid  = chunk_id.split("|")[0]
+#         did  = chunk_id.split("|")[1]
+#         pseq = chunk_id.split("|")[2]
+#         cid  = f"{cfg.config_id}_{chunk_id}"
+
+
+#         # if cid in written_ids:
+#         #     n_ok += 1
+#         #     continue
+
+#         base_vec, content = fetch_chunk(orig_collection, tid, did, pseq)
+#         if base_vec is None:
+#             warnings.warn(f"  ⚠  Build(aug): chunk not found {chunk_id} — skipping.")
+#             continue
+
+#         aug_vec = augment_chunk(base_vec, cfg, query_index=None, untargeted=True)  # query_index = None -> non-targeted
+#         aug_collection.upsert(
+#             ids        = [cid],
+#             embeddings = [aug_vec.tolist()],
+#             documents  = [content or ""],
+#             metadatas  = [{
+#                 "triplet_index": tid,
+#                 "document_id":   did,
+#                 "phrase_seq":    pseq,
+#                 "query_index":   None,
+#                 "config_id":     cfg.config_id,
+#                 "restricted":    False,
+#             }],
+#         )
+#         written_ids.add(cid)
+#         n_ok += 1
+
+#         if verbose:
+#             print(f"  Augmented untargeted chunk {chunk_id} → {cid}")
+
+#     return n_ok
+
+@timed("build_rotated_db_untargeted_chunks")
+def _build_rotated_db_untargeted_chunks(
+    gt_records:         list[dict],
+    registry:       RotationRegistry,
+    orig_collection,
+    rot_collection,
+    written_ids:    set[str],
+    verbose:        bool = True,
+) -> int:
+    """Rotate and upsert all targeted chunks for one GT record. Returns n upserted."""
+    n_ok = 0
+    untargeted_chunks = []
+    list_of_chunk_ids = get_all_chunk_ids(gt_records)
+    list_of_targeted_chunk_ids = get_list_id_targeted_chunk(gt_records)
+    for chunk_id in list_of_chunk_ids:
+        if chunk_id not in list_of_targeted_chunk_ids:
+            untargeted_chunks.append(chunk_id)
+
+
+    for chunk_id in untargeted_chunks:
+        tid  = chunk_id.split("|")[0]
+        did  = chunk_id.split("|")[1]
+        pseq = chunk_id.split("|")[2]
+        cid  = f"{tid}_{did}_{pseq}"
+
+        if cid in written_ids:
+            n_ok += 1
+            continue
+
+        orig_vec, content = fetch_chunk(orig_collection, tid, did, pseq)
+
+        rot_collection.upsert(
+            ids        = [cid],
+            embeddings = [orig_vec.tolist()],
+            documents  = [content or ""],
+            metadatas  = [{
+                "triplet_index": tid,
+                "document_id":   did,
+                "phrase_seq":    pseq,
+                "rotation_seed": None,
+            }],
+        )
+        written_ids.add(cid)
+        n_ok += 1
+        if verbose:
+            print(f"  Augmented untargeted chunk {chunk_id} → {cid}")
+    return n_ok
+
 
 @timed("build_rotated_db_single_record")
 def _build_record(
@@ -679,6 +792,7 @@ def _evaluate_record(raw: RawQueryRetrieval) -> QueryEvalResult:
         ))
 
     overlap_set = set(raw.original_topk_ids) & set(raw.rotated_topk_ids)
+    target_chunk_id = [f'{target.split("|")[0]}|{target[-2]}|{target[-1]}' for target in targeted]
 
     return QueryEvalResult(
         query_id                        = raw.query_id,
@@ -691,8 +805,8 @@ def _evaluate_record(raw: RawQueryRetrieval) -> QueryEvalResult:
         rotated_topk_ids                = raw.rotated_topk_ids,
         overlap_count                   = len(overlap_set),
         overlap_fraction                = len(overlap_set) / max(len(raw.original_topk_ids), 1),
-        targeted_in_rot_query_rot_db    = sum(1 for cid in raw.rotated_topk_ids             if cid in targeted),
-        targeted_in_unrot_query_rot_db  = sum(1 for cid in raw.rotated_topk_ids_unrot_query if cid in targeted),
+        targeted_in_rot_query_rot_db    = sum(1 for cid in raw.rotated_topk_ids             if cid in target_chunk_id),
+        targeted_in_unrot_query_rot_db  = sum(1 for cid in raw.rotated_topk_ids_unrot_query if cid in target_chunk_id),
     )
 
 
@@ -771,6 +885,8 @@ def run_experiment(
 
     orig_coll = _get_original_collection(ORIGINAL_CHROMA, ORIGINAL_COLLECTION)
     rot_coll  = _get_or_create_rotated_collection(ROTATED_CHROMA, ROTATED_COLLECTION)
+    written_ids: set[str] = set()
+    _build_rotated_db_untargeted_chunks(gt_records, registry, orig_coll, rot_coll, written_ids, verbose=verbose) # add the untargeted chunks
 
     # Phase 1
     build_rotated_db(gt_records, registry, orig_coll, rot_coll, verbose=verbose)
