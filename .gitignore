@@ -16,10 +16,10 @@ venv/
 venv2/
 vulnerability_check/
 
-*.so
 
 
 
+*.ipynb
 *.png
 todo.txt
 *.html
