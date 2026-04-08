@@ -96,7 +96,7 @@ from query_pipeline import BGE_QUERY_PREFIX
 from plot_PCA import get_all_chunk_ids, get_list_id_targeted_chunk
 
 DEFAULT_TOP_K     = 20
-DEFAULT_LARGE_VAL = 1e9
+DEFAULT_LARGE_VAL = 10000 # 1e6
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
 LOGS_DIR          = Path("logs")
@@ -104,7 +104,7 @@ RESULTS_DIR       = Path("results")
 GT_FILE           = Path("documents_RAGBench/merged_id_triplets_with_metadata2.json")
 DIM_RESULTS_FILE  = RESULTS_DIR / "dim_results.json"
 DIM_REGISTRY_FILE = RESULTS_DIR / "dim_registry.json"
-TIMING_FILE       = LOGS_DIR    / f"dim_timing_largeval_{DEFAULT_LARGE_VAL}_topk_{DEFAULT_TOP_K}.json"
+TIMING_FILE       = LOGS_DIR    / f"dim_timing_largeval_{DEFAULT_LARGE_VAL}_topk_{DEFAULT_TOP_K}_without_untargeted.json"
 
 ORIGINAL_CHROMA     = os.path.join(os.getcwd(), "./chroma_db")
 ORIGINAL_COLLECTION = COLLECTION
@@ -307,14 +307,17 @@ def augment_chunk(
     # extra.fill(DEFAULT_LARGE_VAL)
     if untargeted:
         # all-zero extra dims → non-targeted chunk
-        return _l2_norm(np.concatenate([base_vec.astype(np.float32), extra])) if cfg.normalize_after else np.concatenate([base_vec.astype(np.float32), extra])
+        return np.concatenate([base_vec.astype(np.float32), extra])
+    
+        # return _l2_norm(np.concatenate([base_vec.astype(np.float32), extra])) if cfg.normalize_after else np.concatenate([base_vec.astype(np.float32), extra])
 
     if query_index is not None:
         # extra[query_index] = cfg.large_value
         extra[query_index] = DEFAULT_LARGE_VAL
 
     aug = np.concatenate([base_vec.astype(np.float32), extra])
-    return _l2_norm(aug) if cfg.normalize_after else aug
+    # return _l2_norm(aug) if cfg.normalize_after else aug
+    return aug
 
 
 def augment_query(
@@ -335,8 +338,8 @@ def augment_query(
         extra[query_index] = DEFAULT_LARGE_VAL
 
     aug = np.concatenate([base_vec.astype(np.float32), extra])
-    return _l2_norm(aug) if cfg.normalize_after else aug
-
+    # return _l2_norm(aug) if cfg.normalize_after else aug
+    return aug
 
 def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
     denom = np.linalg.norm(a) * np.linalg.norm(b)
@@ -632,6 +635,14 @@ def build_aug_db(
         if not triplet_index or not record.get("targeted_chunk"):
             continue
 
+        if True:
+            with open(DIM_REGISTRY_FILE, "r", encoding="utf-8") as fh:
+                file = json.load(fh)  
+                dict_key_dim = file.get("query_index_map", {})
+        
+            if dict_key_dim.get(str(triplet_index)) != i:
+                print("error in the mapping")
+
         n = _build_aug_record(record, i, cfg, orig_collection, aug_collection, written_ids)
         if verbose:
             print(f"  [{i+1}/{len(gt_records)}] triplet_{triplet_index}  chunks_upserted={n}")
@@ -804,29 +815,68 @@ def _query_record(
     n_aug = max(1, aug_collection.count())
 
     t0 = time.perf_counter()
+#     aug_res_auth = aug_collection.query(
+#     query_embeddings=[auth_q.tolist()],
+#     n_results=min(top_k, n_aug, len(stable_chunks)),
+#     include=["metadatas"],
+# )
+    aug_res_auth = aug_collection.query(
+    query_embeddings=[auth_q.tolist()],
+    n_results=min(top_k, n_aug),
+    include=["metadatas"],
+    )
+    
+    if True: # code to check the overlap between retrieved chunks and targeted chunks -> proof that it's working
+        out = aug_collection.query(
+            query_embeddings=[auth_q.tolist()],
+            n_results=min(top_k, n_aug, len(stable_chunks)),
+            include=["metadatas", "distances", "embeddings"],
+        )
+        aug_res_auth_, distances, embeddings = out["metadatas"], out.get("distances", [[]])[0], out.get("embeddings", [[]])[0]
+        # take out["metadatas"] instead of out["metadatas"][0] because rest of the code
+        dist = distances
+        list_cosine = []
+        for emb in embeddings:
+            a = 1 -cosine_similarity(np.array(auth_q, dtype=np.float64), np.array(emb, dtype=np.float64))
+            list_cosine.append(a)
+        list_chunk_returned = []
+        list_stable_chunk_id = []
+        for chunk in aug_res_auth_[0]:
+            chunk_id = f"{chunk['triplet_index']}|{chunk['document_id']}|{chunk['phrase_seq']}"
+            list_chunk_returned.append(chunk_id)
+        
+        for chunk in stable_chunks:
+            chunk_id = f"{chunk.split('|')[0]}|{chunk[-2]}|{chunk[-1]}"
+            list_stable_chunk_id.append(chunk_id)
+        
+        # overlap = set(list_chunk_returned) & set(list_stable_chunk_id)
+        # print(f"overlap between stable chunks and retrieved chunks: {overlap}")
+
+        sum_overlap = sum ([ 1 for chunk in list_chunk_returned if chunk in list_stable_chunk_id])
+        if sum_overlap < len(stable_chunks):
+            print(f"⚠  Only {sum_overlap} out of {len(stable_chunks)} targeted chunks were retrieved in the augmented DB top-{top_k}. Consider increasing top_k or checking the augmentation process.")
+        # print(f"sum of overlap: {sum(sum_overlap)} out of {len(stable_chunks)} targeted chunks")
+
+
+
     # aug_res_auth = aug_collection.query(
     #     query_embeddings=[auth_q.tolist()],
-    #     n_results=min(top_k, n_aug),
+    #     n_results=n_aug*2,
     #     include=["metadatas"],
     # )
-    aug_res_auth = aug_collection.query(
-        query_embeddings=[auth_q.tolist()],
-        n_results=n_aug*2,
-        include=["metadatas"],
-    )
     t_q_aug_a = time.perf_counter() - t0
 
     t0 = time.perf_counter()
-    # aug_res_unauth = aug_collection.query(
-    #     query_embeddings=[unauth_q.tolist()],
-    #     n_results=min(top_k, n_aug),
-    #     include=["metadatas"],
-    # )
     aug_res_unauth = aug_collection.query(
         query_embeddings=[unauth_q.tolist()],
-        n_results=n_aug*2,
+        n_results=min(top_k, n_aug, len(stable_chunks)),
         include=["metadatas"],
     )
+    # aug_res_unauth = aug_collection.query(
+    #     query_embeddings=[unauth_q.tolist()],
+    #     n_results=n_aug*2,
+    #     include=["metadatas"],
+    # )
     t_q_aug_u = time.perf_counter() - t0
 
     def _ids(metas: list[dict]) -> list[str]:
@@ -922,6 +972,16 @@ def run_query_phase(
             if verbose:
                 print(f"  [{i+1}] ⚠  No targeted chunks — skipping.")
             continue
+        
+        if True:
+            with open(DIM_REGISTRY_FILE, "r", encoding="utf-8") as fh:
+                file = json.load(fh)  
+                dict_key_dim = file.get("query_index_map", {})
+            
+            if dict_key_dim.get(str(triplet_index)) != i:
+                print("error in the mapping")
+
+
 
         raw = _query_record(
             record, i, cfg, embedder,
@@ -931,6 +991,18 @@ def run_query_phase(
 
         if verbose:
             n_t = len(raw.targeted_chunk_ids)
+            targeted_chunk_ids_format = [f"{c.split('|')[0]}|{c[-2]}|{c[-1]}" for c in raw.targeted_chunk_ids]
+            # print(
+            #     f"  [{i+1}/{len(gt_records)}] {raw.query_id}"
+            #     f"  t_embed={raw.t_embed_query_s:.4f}s"
+            #     f"  t_aug_auth={raw.t_augment_auth_s:.6f}s"
+            #     f"  t_q_aug_auth={raw.t_query_aug_auth_s:.4f}s"
+            #     f"  t_q_aug_unauth={raw.t_query_aug_unauth_s:.4f}s"
+            #     f"  t_q_meta_auth={raw.t_query_meta_auth_s:.4f}s"
+            #     f"  t_q_meta_unauth={raw.t_query_meta_unauth_s:.4f}s"
+            #     f"  targeted_aug_auth={sum(1 for c in raw.aug_topk_auth_ids if c in set(raw.targeted_chunk_ids))}/{n_t}"
+            #     f"  targeted_aug_unauth={sum(1 for c in raw.aug_topk_unauth_ids if c in set(raw.targeted_chunk_ids))}/{n_t}"
+            # )
             print(
                 f"  [{i+1}/{len(gt_records)}] {raw.query_id}"
                 f"  t_embed={raw.t_embed_query_s:.4f}s"
@@ -939,8 +1011,8 @@ def run_query_phase(
                 f"  t_q_aug_unauth={raw.t_query_aug_unauth_s:.4f}s"
                 f"  t_q_meta_auth={raw.t_query_meta_auth_s:.4f}s"
                 f"  t_q_meta_unauth={raw.t_query_meta_unauth_s:.4f}s"
-                f"  targeted_aug_auth={sum(1 for c in raw.aug_topk_auth_ids if c in set(raw.targeted_chunk_ids))}/{n_t}"
-                f"  targeted_aug_unauth={sum(1 for c in raw.aug_topk_unauth_ids if c in set(raw.targeted_chunk_ids))}/{n_t}"
+                f"  targeted_aug_auth={sum(1 for c in raw.aug_topk_auth_ids if c in set(targeted_chunk_ids_format))}/{n_t}"
+                f"  targeted_aug_unauth={sum(1 for c in raw.aug_topk_unauth_ids if c in set(targeted_chunk_ids_format))}/{n_t}"
             )
 
     return raw_results
@@ -1046,6 +1118,56 @@ def evaluate_results(
 
     return eval_results
 
+############## TESTING PART ############
+
+def test_query_index_map_dim_database(gt_records, aug_collection):
+    with open(DIM_REGISTRY_FILE, "r", encoding="utf-8") as fh:
+        file = json.load(fh)  
+        dict_key_dim = file.get("query_index_map", {})
+    
+    for record in gt_records:
+        triplet_index = record.get("id_triplets")
+        for target_chunk in record.get("targeted_chunk", []):
+            tid  = target_chunk.split("|")[0]
+            did  = target_chunk[-2]
+            pseq = target_chunk[-1]
+            # cid  = f"{cfg.config_id}_{triplet_index}_{did}_{pseq}"
+
+            result = aug_collection.get(
+                where={
+                    "$and": [
+                        {"triplet_index": {"$eq": tid}},
+                        {"document_id":   {"$eq": did}},
+                        {"phrase_seq":    {"$eq": pseq}},
+                    ]
+                },
+                include=["embeddings"],
+            )
+
+            # check if the value of the 1024 + i dim is different from 0,
+
+            results = result.get("embeddings", [])
+            results = results[0] 
+            id_from_triplet = dict_key_dim.get(str(triplet_index))
+            modified_dim_index = 1024 + int(id_from_triplet)
+            print(f"checking chunk with tid={tid}, did={did}, pseq={pseq}, modified_dim_index={modified_dim_index},\n value modified={results[modified_dim_index]}")
+            if(results[modified_dim_index] == 0):
+                print("error in the encoding of the chunk")
+
+            
+    #         if cid not in aug_collection.get(ids=[cid])["ids"]:
+    #             print(f"Error: chunk {cid} not found in augmented collection.")
+    #     if not triplet_index or not record.get("targeted_chunk"):
+    #         continue
+    
+    # # Check if the mapping is correct for a few sample triplet indices
+    # sample_triplet_indices = list(dict_key_dim.keys())[:5]  # take first 5 for testing
+    # for triplet_index in sample_triplet_indices:
+    #     query_index = dict_key_dim[triplet_index]
+    #     print(f"Triplet index {triplet_index} is mapped to query index {query_index}")
+
+
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # 8.  Orchestrator
@@ -1093,6 +1215,8 @@ def run_experiment(
     aug_coll  = _get_aug_collection(cfg.config_id)
     meta_coll = _get_meta_collection()
 
+
+
     # Persist registry
     with open(DIM_REGISTRY_FILE, "w", encoding="utf-8") as fh:
         json.dump({
@@ -1110,13 +1234,15 @@ def run_experiment(
     # Phase 1
     build_aug_db(gt_records, cfg, orig_coll, aug_coll, verbose=verbose)
     # build_meta_db(gt_records, orig_coll, meta_coll, verbose=verbose)
+    
+    # test_query_index_map_dim_database(gt_records, aug_coll)
 
-    # build_aug_db(gt_records, cfg, orig_coll, aug_coll, verbose=False)
+    build_aug_db(gt_records, cfg, orig_coll, aug_coll, verbose=False)
     # build_meta_db(gt_records, orig_coll, meta_coll, verbose=False)
 
     # add the untargeted chunks to the augmented DB (Method 2)
     written_ids: set[str] = set()
-    _build_aug_db_all_untargeted_chunks(gt_records, cfg, orig_coll, aug_coll, written_ids)
+    # _build_aug_db_all_untargeted_chunks(gt_records, cfg, orig_coll, aug_coll, written_ids)
     # written_ids: set[str] = set()
     # build_meta_db_add_untargeted_chunks(gt_records, orig_coll, meta_coll, written_ids)
 
@@ -1125,16 +1251,18 @@ def run_experiment(
         gt_records, cfg, embedder, orig_coll, aug_coll, meta_coll,
         top_k=top_k, verbose=verbose,
     )
-    raw_results = run_query_phase(
-        gt_records, cfg, embedder, orig_coll, aug_coll, meta_coll,
-        top_k=top_k, verbose=False,
-    )
+    # raw_results = run_query_phase(
+    #     gt_records, cfg, embedder, orig_coll, aug_coll, meta_coll,
+    #     top_k=top_k, verbose=False,
+    # )
 
     # Phase 3
     eval_results = evaluate_results(raw_results, cfg, verbose=verbose)
 
     save_timing_log(eval_results=eval_results)
     return eval_results
+
+
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
