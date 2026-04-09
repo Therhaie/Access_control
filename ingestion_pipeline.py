@@ -70,15 +70,7 @@ def extract_meaningfull_data(json_path, output_path=os.path.join(os.getcwd(),'do
         doc = json.load(f)
         print(type(doc))
         print(doc.keys())
-    # results = [
-    # {
-    #     "sentences": entry["row"]["documents_sentences"],
-    #     "question": entry["row"]["question"],
-    #     "response": entry["row"]["response"],
-    #     "id_triplets":entry["row"]["id"]
-    # }
-    # for entry in doc["rows"]
-    # ]
+
     results = []
     for entry in doc.get('rows', []):
         row = entry.get('row', {})
@@ -86,16 +78,14 @@ def extract_meaningfull_data(json_path, output_path=os.path.join(os.getcwd(),'do
         question = row.get('question', '')
         response = row.get('response', '')
         id_triplet = row.get('id', '')
-        if id_triplet == "1128":
-            print(f"Debug: Found id_triplet 1128 with question: {question}")
+
         results.append({
             "sentences": sentences,
             "question": question,
             "response": response,
             "id_triplets": id_triplet
         })
-        if id_triplet == "1128":
-            pass
+
         
 
     with open(output_path, 'w') as f:

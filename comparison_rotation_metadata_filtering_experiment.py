@@ -80,6 +80,10 @@ ROTATED_COLLECTION  = "rotated_experiment"
 
 DEFAULT_TOP_K = 20
 
+# new parameters
+DISTANCE_METRIC = "cosine"  # or "euclidean", "l2"
+META_CHROMA_BASE    = os.path.join(os.getcwd(), "./chroma_meta_db")
+META_NAME           = "meta_access_control_experiment"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # 0.  Timing infrastructure
@@ -302,9 +306,13 @@ def _get_original_collection(path: str, name: str):
 
 def _get_or_create_rotated_collection(path: str, name: str):
     return _get_client(path).get_or_create_collection(
-        name=name, metadata={"hnsw:space": "cosine"}
+        name=name, metadata={"hnsw:space": f"{DISTANCE_METRIC}"}
     )
 
+def _get_meta_collection():
+    return _get_client(META_CHROMA_BASE).get_or_create_collection(
+        name=META_NAME, metadata={"hnsw:space": f"{DISTANCE_METRIC}"}
+    )
 
 @timed("fetch_chunk_from_original_db")
 def fetch_chunk(
@@ -378,14 +386,22 @@ class RawQueryRetrieval:
     # Top-K IDs from rotated collection   (UNrotated query) — sanity baseline
     rotated_topk_ids_unrot_query: list[str] = field(default_factory=list)
 
+    # Top-K IDs from meta collection   (meta query)  
+    meta_topk_auth_ids:   list[str] = field(default_factory=list)   # no filter
+    meta_topk_unauth_ids: list[str] = field(default_factory=list)   # filtered
+
     # Per-chunk raw vectors: chunk_key → {"orig": list[float], "rot": list[float]}
     chunk_vectors: dict = field(default_factory=dict)
 
     # Precise per-step timings (measured inside _query_record, not by @timed)
     t_embed_query_s:    float = 0.0
+    # rotated part
     t_apply_rotation_s: float = 0.0
     t_query_original_s: float = 0.0
     t_query_rotated_s:  float = 0.0
+    # metadata part
+    t_query_meta_auth_s:    float = 0.0
+    t_query_meta_unauth_s:  float = 0.0    
 
     timestamp: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
@@ -422,67 +438,7 @@ class QueryEvalResult:
 # 5.  Phase 1 — Build the rotated database
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# @timed("build_rotated_db_all_untargeted_chunks")
-# def _build_rotated_db_all_untargeted_chunks(
-#     gt_records:     list[dict],
-#     cfg:            ExtraDimConfig,
-#     orig_collection,
-#     aug_collection,
-#     written_ids:    set[str],
-#     verbose:        bool = True,
-# ) -> int:
-#     """
-#     Augment and upsert all untargeted chunks for all GT records (Method 2).
-#     This is a fallback to ensure that every chunk in the original DB is present
-#     in the augmented DB with some augmentation state (targeted or non-targeted).
-#     """
-#     n_ok = 0
 
-#     # get the id of all chunks
-#     untargeted_chunks = []
-#     list_of_chunk_ids = get_all_chunk_ids(gt_records)
-#     list_of_targeted_chunk_ids = get_list_id_targeted_chunk(gt_records)
-#     for chunk_id in list_of_chunk_ids:
-#         if chunk_id not in list_of_targeted_chunk_ids:
-#             untargeted_chunks.append(chunk_id)
-
-#     for chunk_id in untargeted_chunks:
-#         tid  = chunk_id.split("|")[0]
-#         did  = chunk_id.split("|")[1]
-#         pseq = chunk_id.split("|")[2]
-#         cid  = f"{cfg.config_id}_{chunk_id}"
-
-
-#         # if cid in written_ids:
-#         #     n_ok += 1
-#         #     continue
-
-#         base_vec, content = fetch_chunk(orig_collection, tid, did, pseq)
-#         if base_vec is None:
-#             warnings.warn(f"  ⚠  Build(aug): chunk not found {chunk_id} — skipping.")
-#             continue
-
-#         aug_vec = augment_chunk(base_vec, cfg, query_index=None, untargeted=True)  # query_index = None -> non-targeted
-#         aug_collection.upsert(
-#             ids        = [cid],
-#             embeddings = [aug_vec.tolist()],
-#             documents  = [content or ""],
-#             metadatas  = [{
-#                 "triplet_index": tid,
-#                 "document_id":   did,
-#                 "phrase_seq":    pseq,
-#                 "query_index":   None,
-#                 "config_id":     cfg.config_id,
-#                 "restricted":    False,
-#             }],
-#         )
-#         written_ids.add(cid)
-#         n_ok += 1
-
-#         if verbose:
-#             print(f"  Augmented untargeted chunk {chunk_id} → {cid}")
-
-#     return n_ok
 
 @timed("build_rotated_db_untargeted_chunks")
 def _build_rotated_db_untargeted_chunks(
@@ -612,6 +568,126 @@ def build_rotated_db(
     return registry
 
 
+@timed("build_meta_db_add_untargeted_chunks")
+def build_meta_db_add_untargeted_chunks(
+    gt_records:         list[dict],
+    orig_collection,
+    meta_collection,
+    written_ids:    set[str],
+) -> int:
+    """Upsert plain vectors with restricted=True metadata (Method 3)."""
+    # triplet_index = gt_records["id_triplets"]
+    # stable_chunks = gt_records["targeted_chunk"]
+    n_ok = 0
+
+    untargeted_chunks = []
+    list_of_chunk_ids = get_all_chunk_ids(gt_records)
+    list_of_targeted_chunk_ids = get_list_id_targeted_chunk(gt_records)
+    for chunk_id in list_of_chunk_ids:
+        if chunk_id not in list_of_targeted_chunk_ids:
+            untargeted_chunks.append(chunk_id)
+
+    for chunk_id in untargeted_chunks:
+        tid  = chunk_id.split("|")[0]
+        did  = chunk_id.split("|")[1]
+        pseq = chunk_id.split("|")[2]
+        cid  = f"{tid}_{did}_{pseq}"
+
+        if cid in written_ids:
+            n_ok += 1
+            continue
+
+        base_vec, content = fetch_chunk(orig_collection, tid, did, pseq)
+        if base_vec is None:
+            warnings.warn(f"  ⚠  Build(aug): chunk not found {chunk_id} — skipping.")
+            continue
+
+        meta_collection.upsert(
+            ids        = [cid],
+            embeddings = [base_vec.tolist()],
+            documents  = [content or ""],
+            metadatas  = [{
+                "triplet_index": tid,
+                "document_id":   did,
+                "phrase_seq":    pseq,
+                "restricted":    False,
+            }],
+        )
+        written_ids.add(cid)
+        n_ok += 1
+
+    return n_ok
+
+@timed("build_meta_db_single_record")
+def _build_meta_record(
+    record:         dict,
+    orig_collection,
+    meta_collection,
+    written_ids:    set[str],
+) -> int:
+    """Upsert plain vectors with restricted=True metadata (Method 3)."""
+    triplet_index = record["id_triplets"]
+    stable_chunks = record["targeted_chunk"]
+    n_ok = 0
+
+    for chunk_id in stable_chunks:
+        tid  = chunk_id.split("|")[0]
+        did  = chunk_id[-2]
+        pseq = chunk_id[-1]
+        cid  = f"meta_{triplet_index}_{did}_{pseq}"
+
+        if cid in written_ids:
+            n_ok += 1
+            continue
+
+        base_vec, content = fetch_chunk(orig_collection, tid, did, pseq)
+        if base_vec is None:
+            warnings.warn(f"  ⚠  Build(meta): chunk not found {chunk_id} — skipping.")
+            continue
+
+        meta_collection.upsert(
+            ids        = [cid],
+            embeddings = [base_vec.tolist()],
+            documents  = [content or ""],
+            metadatas  = [{
+                "triplet_index": triplet_index,
+                "document_id":   did,
+                "phrase_seq":    pseq,
+                "restricted":    f"{triplet_index}_True",
+            }],
+        )
+        written_ids.add(cid)
+        n_ok += 1
+
+    return n_ok
+
+@timed("build_meta_db")
+def build_meta_db(
+    gt_records:     list[dict],
+    orig_collection,
+    meta_collection,
+    verbose:        bool = True,
+) -> None:
+    """Phase 1 (Method 3) — full pass over GT records to build the metadata DB."""
+    print(f"\n{'─'*60}")
+    print(f"  Phase 1b — Building metadata DB")
+    print(f"{'─'*60}")
+
+    written_ids: set[str] = set()
+
+    for i, record in enumerate(gt_records):
+        triplet_index = record.get("id_triplets")
+        if not triplet_index or not record.get("targeted_chunk"):
+            continue
+
+        n = _build_meta_record(record, orig_collection, meta_collection, written_ids)
+        if verbose:
+            print(f"  [{i+1}/{len(gt_records)}] triplet_{triplet_index}  chunks_upserted={n}")
+
+    print(f"\n  ✅ Metadata DB build complete")
+
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # 6.  Phase 2 — Query phase
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -623,6 +699,7 @@ def _query_record(
     embedder,
     orig_collection,
     rot_collection,
+    meta_collection,
     top_k:          int,
 ) -> RawQueryRetrieval:
     """
@@ -666,6 +743,11 @@ def _query_record(
         f"{m.get('triplet_index','?')}|{m.get('document_id','?')}|{m.get('phrase_seq','?')}"
         for m in orig_res["metadatas"][0]
     ]
+    def _ids(metas: list[dict]) -> list[str]:
+        return [
+            f"{m.get('triplet_index','?')}|{m.get('document_id','?')}|{m.get('phrase_seq','?')}"
+            for m in metas
+        ]
 
     # Step 4 — retrieve from rotated DB (rotated query) — main experiment
     n_rot = max(1, rot_collection.count())
@@ -692,6 +774,35 @@ def _query_record(
         for m in rot_res_unrot["metadatas"][0]
     ]
 
+    ### Metadata part
+
+    # Step 4 — retrieve from metadata DB
+    n_meta = max(1, meta_collection.count())
+    t0 = time.perf_counter()
+    meta_res_auth = meta_collection.query(
+        query_embeddings=[query_vec.tolist()],
+        n_results=min(top_k, n_meta),
+        where={"restricted": {"$eq": f"{triplet_index}_True"}},
+        include=["metadatas"],
+    )
+    t_q_meta_a = time.perf_counter() - t0
+
+    t0 = time.perf_counter()
+    try:
+        meta_res_unauth = meta_collection.query(
+            query_embeddings=[query_vec.tolist()],
+            n_results=min(top_k, n_meta),
+            where={"restricted": {"$ne": f"{triplet_index}_True"}},
+            include=["metadatas"],
+        )
+    except Exception as e:
+        warnings.warn(f"Metadata filter query failed: {e}. Falling back to no filter.")
+        meta_res_unauth = meta_res_auth
+    t_q_meta_u = time.perf_counter() - t0
+
+    meta_topk_auth   = _ids(meta_res_auth["metadatas"][0])
+    meta_topk_unauth = _ids(meta_res_unauth["metadatas"][0])
+
     # Collect per-chunk vectors for Phase 3 similarity computation
     chunk_vectors: dict[str, dict] = {}
     for chunk_id in stable_chunks:
@@ -717,11 +828,15 @@ def _query_record(
         original_topk_ids             = original_topk_ids,
         rotated_topk_ids              = rotated_topk_ids,
         rotated_topk_ids_unrot_query  = rotated_topk_ids_unrot,
+        meta_topk_auth_ids            = meta_topk_auth,
+        meta_topk_unauth_ids          = meta_topk_unauth,
         chunk_vectors                 = chunk_vectors,
         t_embed_query_s               = round(t_embed,      6),
         t_apply_rotation_s            = round(t_rotate,     6),
         t_query_original_s            = round(t_query_orig, 6),
         t_query_rotated_s             = round(t_query_rot,  6),
+        t_query_meta_auth_s          = round(t_q_meta_a,   6),
+        t_query_meta_unauth_s        = round(t_q_meta_u,   6),
     )
 
 
@@ -732,6 +847,7 @@ def run_query_phase(
     embedder,
     orig_collection,
     rot_collection,
+    meta_collection,
     top_k:          int  = DEFAULT_TOP_K,
     verbose:        bool = True,
 ) -> list[RawQueryRetrieval]:
@@ -750,7 +866,7 @@ def run_query_phase(
             continue
 
         raw = _query_record(
-            record, registry, embedder, orig_collection, rot_collection, top_k
+            record, registry, embedder, orig_collection, rot_collection, meta_collection, top_k
         )
         raw_results.append(raw)
 
@@ -761,6 +877,9 @@ def run_query_phase(
                 f"  t_rotate={raw.t_apply_rotation_s:.6f}s"
                 f"  t_query_orig={raw.t_query_original_s:.4f}s"
                 f"  t_query_rot={raw.t_query_rotated_s:.4f}s"
+                f"  t_query_meta_auth={raw.t_query_meta_auth_s:.4f}s"
+                f"  t_query_meta_unauth={raw.t_query_meta_unauth_s:.4f}s"
+
             )
 
     return raw_results
@@ -885,11 +1004,19 @@ def run_experiment(
 
     orig_coll = _get_original_collection(ORIGINAL_CHROMA, ORIGINAL_COLLECTION)
     rot_coll  = _get_or_create_rotated_collection(ROTATED_CHROMA, ROTATED_COLLECTION)
+    meta_coll = _get_meta_collection()
+    
     written_ids: set[str] = set()
 
     # Phase 1
     build_rotated_db(gt_records, registry, orig_coll, rot_coll, verbose=verbose)
+    build_meta_db(gt_records, orig_coll, meta_coll, verbose=verbose)
+
+    written_ids: set[str] = set()
     _build_rotated_db_untargeted_chunks(gt_records, registry, orig_coll, rot_coll, written_ids, verbose=verbose) # add the untargeted chunks
+    written_ids: set[str] = set()
+    build_meta_db_add_untargeted_chunks(gt_records, orig_coll, meta_coll, written_ids)
+
 
     with open(ROTATION_REGISTRY_F, "w", encoding="utf-8") as fh:
         json.dump(registry.to_serialisable(), fh, indent=2)
@@ -897,7 +1024,7 @@ def run_experiment(
 
     # Phase 2
     raw_results = run_query_phase(
-        gt_records, registry, embedder, orig_coll, rot_coll,
+        gt_records, registry, embedder, orig_coll, rot_coll, meta_coll,
         top_k=top_k, verbose=verbose,
     )
 

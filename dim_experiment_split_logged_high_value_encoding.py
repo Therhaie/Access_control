@@ -96,9 +96,12 @@ from query_pipeline import BGE_QUERY_PREFIX
 from plot_PCA import get_all_chunk_ids, get_list_id_targeted_chunk
 
 DEFAULT_TOP_K     = 20
-DEFAULT_LARGE_VAL = 10 # 1e6
-DEFAULT_LARGE_VAL_UNTARGETED = DEFAULT_LARGE_VAL  #* 0.001
+DEFAULT_LARGE_VAL = 1e9 # 1e12 #1000000 # 1e6
+DEFAULT_LARGE_VAL_UNTARGETED = 100 # DEFAULT_LARGE_VAL   #* 0.001
 EXTRA_DIM_UNTARGETED_AS_LARGE_VALUE = True # use a 101 dimension for thhe non-targeted chunks
+NORMALIZE_BEFORE_ADDING_EXTRA_DIMS = False 
+DISTANCE_METRIC = "l2"  # "cosine" or "l2" or "ip"
+NUMBER_OF_EXTRA_DIMS = 4  # number of dimension to represent the untargeted chunks
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
 LOGS_DIR          = Path("logs")
@@ -111,7 +114,7 @@ TIMING_FILE       = LOGS_DIR    / f"dim_timing_largeval_{DEFAULT_LARGE_VAL}_topk
 ORIGINAL_CHROMA     = os.path.join(os.getcwd(), "./chroma_db")
 ORIGINAL_COLLECTION = COLLECTION
 AUG_CHROMA_BASE     = os.path.join(os.getcwd(), "./chroma_aug_db")
-AUGMENTED_NAME     = "augmented_db_norm_high_value_encoding_extra_dim_untargeted"  # collection name prefix for augmented DB (one per config)
+AUGMENTED_NAME     = "augmented_db_norm_high_value_encoding_extra_dim_untargeted_nb_extra_dims_" + str(NUMBER_OF_EXTRA_DIMS)  # collection name prefix for augmented DB (one per config)
 META_CHROMA_BASE    = os.path.join(os.getcwd(), "./chroma_meta_db")
 META_NAME           = "meta_access_control"
 
@@ -306,28 +309,39 @@ def augment_chunk(
     None        : non-targeted chunk — all extra dims are zero.
     """
     extra = np.zeros(cfg.n_queries, dtype=np.float32)
-    if EXTRA_DIM_UNTARGETED_AS_LARGE_VALUE:
-        untargeted_dimensions = np.ones(1, dtype=np.float32) 
-        untargeted_dimensions[0]= DEFAULT_LARGE_VAL_UNTARGETED
-        #* DEFAULT_LARGE_VAL_UNTARGETED
-        extra = np.concatenate([base_vec.astype(np.float32), untargeted_dimensions])
-    # extra.fill(DEFAULT_LARGE_VAL)
+    # if EXTRA_DIM_UNTARGETED_AS_LARGE_VALUE:
+    #     untargeted_dimensions = np.zeros(1, dtype=np.float32) 
+    #     untargeted_dimensions[0]= DEFAULT_LARGE_VAL_UNTARGETED
+    #     extra = np.concatenate([base_vec.astype(np.float32), untargeted_dimensions])
+    # normalize the base vec before adding the extra dims
+    if NORMALIZE_BEFORE_ADDING_EXTRA_DIMS:
+        base_vec = _l2_norm(base_vec)
     if untargeted:
+        untargeted_dimensions = np.zeros(NUMBER_OF_EXTRA_DIMS, dtype=np.float32) 
+        untargeted_dimensions[NUMBER_OF_EXTRA_DIMS:]= DEFAULT_LARGE_VAL_UNTARGETED
+
+        extra = np.concatenate([extra.astype(np.float32), untargeted_dimensions])
         # all-zero extra dims → non-targeted chunk
-        concat = np.concatenate([base_vec.astype(np.float32), extra])
-        norm = np.linalg.norm(concat)
-        return concat / norm if norm > 1e-10 else concat
+        concat = np.concatenate([base_vec.astype(np.float32), extra]) 
+        return concat
+        # norm = np.linalg.norm(concat)
+        # return concat / norm if norm > 1e-10 else concat
     
         # return _l2_norm(np.concatenate([base_vec.astype(np.float32), extra])) if cfg.normalize_after else np.concatenate([base_vec.astype(np.float32), extra])
 
+    untargeted_dimensions = np.zeros(NUMBER_OF_EXTRA_DIMS, dtype=np.float32) 
+    # untargeted_dimensions[0]= 0
+    # untargeted_dimensions[1]= 0
+    extra = np.concatenate([extra.astype(np.float32), untargeted_dimensions])
     if query_index is not None:
         # extra[query_index] = cfg.large_value
         extra[query_index] = DEFAULT_LARGE_VAL
 
     aug = np.concatenate([base_vec.astype(np.float32), extra])
-    norm = np.linalg.norm(aug)
+    # norm = np.linalg.norm(aug)
     # return _l2_norm(aug) if cfg.normalize_after else aug
-    return aug / norm if norm > 1e-10 else aug
+    # return aug / norm if norm > 1e-10 else aug
+    return aug
 
 
 def augment_query(
@@ -342,20 +356,29 @@ def augment_query(
     authorised=False → all-zero extra dims               (diverges from own chunks)
     """
     extra = np.zeros(cfg.n_queries, dtype=np.float32)
-    if EXTRA_DIM_UNTARGETED_AS_LARGE_VALUE:
-        untargeted_dimensions = np.ones(1, dtype=np.float32) 
-        untargeted_dimensions[0]= DEFAULT_LARGE_VAL_UNTARGETED
-        #* DEFAULT_LARGE_VAL_UNTARGETED
-        extra = np.concatenate([base_vec.astype(np.float32), untargeted_dimensions])
+    # if EXTRA_DIM_UNTARGETED_AS_LARGE_VALUE:
+    #     untargeted_dimensions = np.zeros(1, dtype=np.float32) 
+    #     untargeted_dimensions[0]= DEFAULT_LARGE_VAL_UNTARGETED
+    #     extra = np.concatenate([base_vec.astype(np.float32), untargeted_dimensions])
     # extra.fill(DEFAULT_LARGE_VAL)
+    if NORMALIZE_BEFORE_ADDING_EXTRA_DIMS:
+        base_vec = _l2_norm(base_vec)
     if authorised:
         # extra[query_index] = cfg.large_value
+        untargeted_dimensions = np.zeros(NUMBER_OF_EXTRA_DIMS, dtype=np.float32) 
+        untargeted_dimensions[NUMBER_OF_EXTRA_DIMS:]= 0
+        extra = np.concatenate([extra.astype(np.float32), untargeted_dimensions])
         extra[query_index] = DEFAULT_LARGE_VAL
+    else:
+        untargeted_dimensions = np.zeros(NUMBER_OF_EXTRA_DIMS, dtype=np.float32) 
+        untargeted_dimensions[NUMBER_OF_EXTRA_DIMS:]= DEFAULT_LARGE_VAL_UNTARGETED
+        extra = np.concatenate([extra.astype(np.float32), untargeted_dimensions])
 
     aug = np.concatenate([base_vec.astype(np.float32), extra])
-    norm = np.linalg.norm(aug)
+    # norm = np.linalg.norm(aug)
+    return aug
     # return _l2_norm(aug) if cfg.normalize_after else aug
-    return aug / norm if norm > 1e-10 else aug
+    # return aug / norm if norm > 1e-10 else aug
 
 def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
     denom = np.linalg.norm(a) * np.linalg.norm(b)
@@ -379,13 +402,13 @@ def _get_original_collection(path: str, name: str):
 
 def _get_aug_collection(cfg_id: str, name: str=AUGMENTED_NAME):
     return _get_client(AUG_CHROMA_BASE).get_or_create_collection(
-        name=f"{name}_{DEFAULT_LARGE_VAL}", metadata={"hnsw:space": "l2"}
+        name=f"{name}_{DEFAULT_LARGE_VAL}", metadata={"hnsw:space": f"{DISTANCE_METRIC}"}
     )
 
 
 def _get_meta_collection():
     return _get_client(META_CHROMA_BASE).get_or_create_collection(
-        name="meta_access_control", metadata={"hnsw:space": "l2"}
+        name="meta_access_control", metadata={"hnsw:space": f"{DISTANCE_METRIC}"}
     )
 
 
@@ -1249,7 +1272,7 @@ def run_experiment(
 
     # Phase 1
     build_aug_db(gt_records, cfg, orig_coll, aug_coll, verbose=verbose)
-    # build_meta_db(gt_records, orig_coll, meta_coll, verbose=verbose)
+    build_meta_db(gt_records, orig_coll, meta_coll, verbose=verbose)
     
     # test_query_index_map_dim_database(gt_records, aug_coll)
 
