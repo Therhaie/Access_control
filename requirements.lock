@@ -4,6 +4,7 @@ aiohappyeyeballs==2.6.1
     # via aiohttp
 aiohttp==3.13.3
     # via
+    #   fsspec
     #   langchain-community
     #   vllm
 aiosignal==1.4.0
@@ -108,6 +109,8 @@ cycler==0.12.1
     # via matplotlib
 dataclasses-json==0.6.7
     # via langchain-community
+datasets==4.8.4
+    # via -r requirements.in
 debugpy==1.8.20
     # via ipykernel
 decorator==5.2.1
@@ -117,7 +120,10 @@ defusedxml==0.7.1
 depyf==0.20.0
     # via vllm
 dill==0.4.1
-    # via depyf
+    # via
+    #   datasets
+    #   depyf
+    #   multiprocess
 diskcache==5.6.3
     # via vllm
 distro==1.9.0
@@ -154,6 +160,7 @@ fastjsonschema==2.21.2
     # via nbformat
 filelock==3.25.2
     # via
+    #   datasets
     #   huggingface-hub
     #   torch
     #   transformers
@@ -170,8 +177,9 @@ frozenlist==1.8.0
     # via
     #   aiohttp
     #   aiosignal
-fsspec==2026.3.0
+fsspec==2026.2.0
     # via
+    #   datasets
     #   huggingface-hub
     #   torch
 gguf==0.18.0
@@ -200,6 +208,7 @@ httpx==0.28.1
     # via
     #   anthropic
     #   chromadb
+    #   datasets
     #   fastapi
     #   fastapi-cloud-cli
     #   jupyterlab
@@ -214,6 +223,7 @@ httpx-sse==0.4.3
     #   mcp
 huggingface-hub==0.36.2
     # via
+    #   datasets
     #   sentence-transformers
     #   tokenizers
     #   transformers
@@ -406,6 +416,8 @@ multidict==6.7.1
     # via
     #   aiohttp
     #   yarl
+multiprocess==0.70.19
+    # via datasets
 mypy-extensions==1.1.0
     # via typing-inspect
 narwhals==2.19.0
@@ -442,6 +454,7 @@ numpy==2.2.6
     # via
     #   chromadb
     #   contourpy
+    #   datasets
     #   flashinfer-python
     #   gguf
     #   langchain-chroma
@@ -581,6 +594,7 @@ overrides==7.7.0
 packaging==26.0
     # via
     #   build
+    #   datasets
     #   flashinfer-python
     #   huggingface-hub
     #   ipykernel
@@ -600,6 +614,7 @@ packaging==26.0
 pandas==3.0.1
     # via
     #   -r requirements.in
+    #   datasets
     #   seaborn
 pandocfilters==1.5.1
     # via nbconvert
@@ -650,6 +665,8 @@ pure-eval==0.2.3
     # via stack-data
 py-cpuinfo==9.0.0
     # via vllm
+pyarrow==23.0.1
+    # via datasets
 pybase64==1.4.3
     # via
     #   chromadb
@@ -730,6 +747,7 @@ python-multipart==0.0.22
 pyyaml==6.0.3
     # via
     #   chromadb
+    #   datasets
     #   gguf
     #   huggingface-hub
     #   jupyter-events
@@ -761,6 +779,7 @@ regex==2026.2.28
     #   vllm
 requests==2.33.0
     # via
+    #   datasets
     #   flashinfer-python
     #   gguf
     #   huggingface-hub
@@ -925,6 +944,7 @@ tornado==6.5.5
 tqdm==4.67.3
     # via
     #   chromadb
+    #   datasets
     #   flashinfer-python
     #   gguf
     #   huggingface-hub
@@ -1051,6 +1071,7 @@ xgrammar==0.1.33
     # via vllm
 xxhash==3.6.0
     # via
+    #   datasets
     #   langgraph
     #   langsmith
 yarl==1.23.0

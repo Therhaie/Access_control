@@ -15,7 +15,7 @@ results/
 venv/
 venv2/
 vulnerability_check/
-
+RAGBench_whole/*.json
 
 
 
